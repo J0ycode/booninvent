@@ -4,6 +4,7 @@ import { saveSupplier, listSuppliers } from "@/server/data/suppliers";
 import { importProducts, listProducts } from "@/server/data/products";
 import { receiveStock } from "@/server/stock/receipts";
 import { saveDraft, sendDispatch, receiveDispatch } from "@/server/stock/dispatches";
+import { createManualRequest } from "@/server/data/restock";
 import { User } from "@/server/models/core";
 
 export interface SeedTenant {
@@ -115,4 +116,8 @@ export async function seedCatalogAndStock(_t: SeedTenant) {
   await send(storeB, accessories.slice(2, 8), 3); // in transit
   await saveDraft(manager, null, { toLocationId: storeA, lines: clothing.slice(30, 33).map((p) => ({ productId: p.id, quantity: 2 })) });
   console.log("Seeded 5 dispatches.");
+
+  // Phase 5: a manual restock request waiting for the Store Room.
+  await createManualRequest(staffB, { note: "Weekend rush", lines: clothing.slice(12, 16).map((p) => ({ productId: p.id, quantity: 6 })) });
+  console.log("Seeded 1 restock request.");
 }

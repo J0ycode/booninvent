@@ -34,3 +34,6 @@ Each entry: decision, reason, alternative considered.
 | 28 | Store receipt: received + missing + damaged must equal sent per line, and a note is required when anything is flagged | Every piece is accounted for | Free entry |
 | 29 | OWNER can also confirm a store receipt (besides the store's staff) | Covers a store with no staff signed in | Staff only |
 | 30 | Dispatch note PDF is served from `/api/dispatches/:id/note` (A4, pdf-lib, Code 128 of the dispatch number) | Printable, shareable, works on phones | Browser print of the HTML page |
+| 31 | A manual restock request is sent to the Store Room on submit (no saved draft step) | The brief says "enter quantities, submit"; fewer steps for staff | A savable draft |
+| 32 | "Suggest restock" covers products the store has carried (a stock row exists), active, with reorderLevel > 0; a new suggestion replaces an unforwarded one | Otherwise every catalogue item would be suggested to every store | Suggesting the whole catalogue |
+| 33 | "Edit" on a suggested line = approve with a new quantity | Matches Approve / Edit / Skip with no extra state | A separate EDITED state |

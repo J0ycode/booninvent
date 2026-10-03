@@ -115,3 +115,25 @@ export async function levelsAtLocation(
   const rows = await StockLevel.find(filter, { productId: 1, quantity: 1 }).lean();
   return rows.map((r) => ({ productId: String(r.productId), quantity: r.quantity }));
 }
+
+/**
+ * Store products at or below their reorder level (only products the store has carried: a stock row exists).
+ * Uses $lookup into products, so it lives with the other stock reads.
+ */
+export async function lowStockAt(ctx: Ctx | null, locationId: string): Promise<{ productId: string; quantity: number; reorderLevel: number }[]> {
+  const c = await guard(ctx, ALL_ROLES);
+  assertLocationAccess(c, locationId);
+  const rows = await StockLevel.aggregate<{ productId: Types.ObjectId; quantity: number; reorderLevel: number }>([
+    { $match: { tenantId: new Types.ObjectId(c.tenantId), locationId: new Types.ObjectId(locationId) } },
+    { $lookup: { from: "products", localField: "productId", foreignField: "_id", as: "p", pipeline: [{ $project: { reorderLevel: 1, active: 1 } }] } },
+    { $unwind: "$p" },
+    { $match: { "p.active": true, "p.reorderLevel": { $gt: 0 }, $expr: { $lte: ["$quantity", "$p.reorderLevel"] } } },
+    { $project: { productId: 1, quantity: 1, reorderLevel: "$p.reorderLevel" } },
+  ]);
+  return rows.map((r) => ({ productId: String(r.productId), quantity: r.quantity, reorderLevel: r.reorderLevel }));
+}
+
+/** Count of low-stock products per location, for dashboards. */
+export async function lowStockCount(ctx: Ctx | null, locationId: string) {
+  return (await lowStockAt(ctx, locationId)).length;
+}

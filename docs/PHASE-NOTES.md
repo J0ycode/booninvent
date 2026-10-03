@@ -90,3 +90,20 @@ pnpm e2e         # first time: pnpm exec playwright install chromium webkit
 - [ ] storeroom → Dispatch → filter "Received with issues" → Return to stock / Write off; it becomes Resolved.
 - [ ] Open "Dispatch note (PDF)" on a phone and a desktop.
 - [ ] storea@demo.test cannot open a Store B dispatch URL (404).
+
+---
+
+## Phase 5: Restock requests
+
+**Built**
+- `src/server/data/restock.ts`: manual request (straight to SENT), Suggest restock (low-stock products, qty = max(1, reorder×2 − current), WAITING_STAFF_APPROVAL, private to the store), Approve / Edit / Skip per line, Forward to Store Room, discard suggestion; Store Room approve (creates a pre-filled draft dispatch in one click, linked back) and reject (with reason). Sending that dispatch marks the request DISPATCHED.
+- Screens: Store → Request Restock (list, New request with the lines editor, Suggest restock, review screen); Store Room → Restock Requests (waiting/approved/dispatched/rejected filter, detail with store vs Store Room stock, Approve → jumps to the draft dispatch, Reject with reason).
+- Seed: one manual request from Store B waiting for the Store Room.
+
+**Run**: `pnpm test` (adds `tests/unit/restock.test.ts`)
+
+**Check by hand**
+- [ ] storeb@demo.test → Request Restock → New request → add 2 products → Send.
+- [ ] storeroom@demo.test → Restock Requests → open it → "Approve and create dispatch" lands on the draft dispatch → Send. The store sees the request as Dispatched.
+- [ ] Suggest restock (store staff): with nothing low you see "Nothing is at or below its reorder level". After Phase 6 sales, Store A has low items; review them with Approve/Edit/Skip, then Forward.
+- [ ] Storeroom never sees a suggestion before it is forwarded.
