@@ -6,7 +6,7 @@ import mongoose, { type Types } from "mongoose";
 import { connectDb, disconnectDb } from "@/server/db";
 import { Tenant, Location, User } from "@/server/models/core";
 import { hashPassword } from "@/server/auth/password";
-import { seedCatalogAndStock } from "./seed-data";
+import { seedCatalogAndStock, seedPlatformBills } from "./seed-data";
 import type { Role } from "@/lib/roles";
 
 export const DEMO_PASSWORD = "Demo@12345";
@@ -76,6 +76,7 @@ async function main() {
   );
 
   await seedCatalogAndStock(demo);
+  await seedPlatformBills(demo.tenant._id, other.tenant._id);
 
   console.log("\nDemo data ready. Password for every account:", DEMO_PASSWORD);
   console.table([

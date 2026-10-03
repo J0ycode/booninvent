@@ -7,6 +7,8 @@ import { saveDraft, sendDispatch, receiveDispatch } from "@/server/stock/dispatc
 import { createManualRequest } from "@/server/data/restock";
 import { applySale } from "@/server/stock/sales";
 import { createEntries } from "@/server/stock/returns";
+import { saveSupplierBill, markSupplierBillPaid } from "@/server/data/bills";
+import { isoDay } from "@/lib/format";
 import { User } from "@/server/models/core";
 
 export interface SeedTenant {
@@ -131,4 +133,25 @@ export async function seedCatalogAndStock(_t: SeedTenant) {
   await createEntries(staffA, { type: "DAMAGED", reason: "Stain that will not wash out", lines: [{ productId: clothing[8].id, quantity: 1 }] });
   await createEntries(staffB, { type: "RETURN_TO_STOREROOM", reason: "Slow seller", lines: [{ productId: clothing[14].id, quantity: 2 }] });
   console.log("Seeded 6 sales and 2 return/damage entries.");
+
+  // Phase 8: supplier bills (one paid, one due soon, one overdue).
+  const d = (n: number) => isoDay(new Date(Date.now() + n * 864e5));
+  const paid = await saveSupplierBill(manager, null, { supplierId: s1.id, billNumber: "LT-2041", billDate: d(-40), dueDate: d(-10), amount: "38450" });
+  await markSupplierBillPaid(owner, paid.id, { note: "Paid by NEFT" });
+  await saveSupplierBill(manager, null, { supplierId: s2.id, billNumber: "TS-118", billDate: d(-35), dueDate: d(-5), amount: "9620", note: "Ask for 2% discount" });
+  await saveSupplierBill(manager, null, { supplierId: s1.id, billNumber: "LT-2077", billDate: d(-3), dueDate: d(12), amount: "15200" });
+  console.log("Seeded 3 supplier bills.");
+}
+
+/** Platform bills issued by the PLATFORM_ADMIN (one overdue for the demo shop). */
+export async function seedPlatformBills(demoTenantId: Types.ObjectId, otherTenantId: Types.ObjectId) {
+  const { adminSavePlatformBill, adminMarkPlatformBillPaid } = await import("@/server/data/bills");
+  const u = await User.findOne({ email: "admin@demo.test" }).lean();
+  const admin = { userId: String(u!._id), role: "PLATFORM_ADMIN" as const, tenantId: null, locationIds: [], tenantStatus: null, name: u!.name, email: u!.email };
+  const d = (n: number) => isoDay(new Date(Date.now() + n * 864e5));
+  const sept = await adminSavePlatformBill(admin, String(demoTenantId), null, { billNumber: "BB-2026-09", description: "Subscription, September 2026", amount: "999", issueDate: d(-33), dueDate: d(-18) });
+  await adminMarkPlatformBillPaid(admin, sept.id, { note: "Paid by UPI" });
+  await adminSavePlatformBill(admin, String(demoTenantId), null, { billNumber: "BB-2026-10", description: "Subscription, October 2026", amount: "999", issueDate: d(-3), dueDate: d(-1) });
+  await adminSavePlatformBill(admin, String(otherTenantId), null, { billNumber: "BB-2026-10-O", description: "Subscription, October 2026", amount: "999", issueDate: d(-3), dueDate: d(12) });
+  console.log("Seeded 3 platform bills.");
 }

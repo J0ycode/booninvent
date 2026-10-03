@@ -46,3 +46,8 @@ Each entry: decision, reason, alternative considered.
 | 40 | Labels are generated server-side (`POST /api/labels`) and logged on every Print/Download; prices print as "Rs." | One source of truth; the built-in PDF fonts cannot draw "₹" | Client-side PDF |
 | 41 | Print on phones opens the PDF in the system viewer; on desktop it prints from a hidden frame | Mobile browsers cannot print an iframe | Download only |
 | 42 | Up to 2,000 labels per job | Keeps PDF generation fast on serverless | Unlimited |
+| 43 | Dates for bills are calendar days in India time (stored as IST midnight); "Overdue" = UNPAID and due date before today (IST), computed on read | Matches how shops think about due dates; never stale | Storing an overdue flag |
+| 44 | Bill totals (unpaid/overdue) ignore the status filter but respect the date and party filters | The cards always show what is outstanding in the chosen period | Totals of the visible page only |
+| 45 | One CSV export route `/api/bills/export` serves supplier bills (managers), the owner's platform bills, and all platform bills (admin), by role | One place to secure | Separate routes |
+| 46 | CSV cells starting with = + - @ get a leading ' | Prevents spreadsheet formula injection | Raw values |
+| 47 | The STOREROOM_MANAGER sees supplier bills but not platform bills | The brief gives the platform Billing page to the OWNER only | Showing both |

@@ -11,7 +11,15 @@ import { ScannerSheet } from "./scanner-sheet";
  * Search box for inventory lists. Updates ?q= (debounced) for server-side search.
  * USB scanners type the code + Enter (instant search). On touch devices a camera button opens the scanner.
  */
-export function ScanSearch({ placeholder = "Search name, SKU or scan barcode", param = "q" }: { placeholder?: string; param?: string }) {
+export function ScanSearch({
+  placeholder = "Search name, SKU or scan barcode",
+  param = "q",
+  scan = true,
+}: {
+  placeholder?: string;
+  param?: string;
+  scan?: boolean;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -29,9 +37,12 @@ export function ScanSearch({ placeholder = "Search name, SKU or scan barcode", p
     startTransition(() => router.replace(`${pathname}?${q.toString()}`, { scroll: false }));
   };
 
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
 
   return (
     <div className="flex w-full gap-2">
@@ -43,7 +54,7 @@ export function ScanSearch({ placeholder = "Search name, SKU or scan barcode", p
           apply(value);
         }}
       >
-        <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" aria-hidden />
         <Input
           type="search"
           value={value}
@@ -59,22 +70,35 @@ export function ScanSearch({ placeholder = "Search name, SKU or scan barcode", p
             timer.current = setTimeout(() => apply(v), 350);
           }}
         />
-        {pending && <Loader2 className="absolute top-1/2 right-3 size-4 -translate-y-1/2 animate-spin text-muted-foreground" aria-label="Searching" />}
+        {pending && (
+          <Loader2 className="text-muted-foreground absolute top-1/2 right-3 size-4 -translate-y-1/2 animate-spin" aria-label="Searching" />
+        )}
       </form>
-      <Button type="button" variant="outline" size="icon" className="hidden pointer-coarse:inline-flex" aria-label="Scan with camera" onClick={() => setScanOpen(true)}>
-        <Camera />
-      </Button>
-      <ScannerSheet
-        open={scanOpen}
-        onOpenChange={setScanOpen}
-        mode="find"
-        title="Scan to search"
-        onPick={({ product }) => {
-          setValue(product.barcode);
-          apply(product.barcode);
-          setScanOpen(false);
-        }}
-      />
+      {scan && (
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="hidden pointer-coarse:inline-flex"
+          aria-label="Scan with camera"
+          onClick={() => setScanOpen(true)}
+        >
+          <Camera />
+        </Button>
+      )}
+      {scan && (
+        <ScannerSheet
+          open={scanOpen}
+          onOpenChange={setScanOpen}
+          mode="find"
+          title="Scan to search"
+          onPick={({ product }) => {
+            setValue(product.barcode);
+            apply(product.barcode);
+            setScanOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }

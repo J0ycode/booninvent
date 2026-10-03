@@ -33,7 +33,7 @@ export default async function AdminShopsPage({ searchParams }: PageProps<"/admin
         <BillTotalsCards totals={bills.totals} />
       </div>
       <div className="mb-4">
-        <ScanSearch placeholder="Search shops by name" />
+        <ScanSearch placeholder="Search shops by name" scan={false} />
       </div>
       {shops.length === 0 ? (
         <EmptyState title="No shops" description={search ? "No shop matches that name." : "Shops appear here after they sign up."} />

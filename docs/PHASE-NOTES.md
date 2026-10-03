@@ -143,3 +143,22 @@ pnpm e2e         # first time: pnpm exec playwright install chromium webkit
 - [ ] Switch to 65 per sheet, tap slot 7: the preview leaves 1-6 empty.
 - [ ] Download the PDF and print one sheet at 100% on plain paper; hold it against a sticker sheet. Scan a printed barcode with the phone scanner: the product is found.
 - [ ] Print on desktop opens the print dialog; on a phone it opens the PDF.
+
+---
+
+## Phase 8: Bills and the platform admin area
+
+**Built**
+- `src/server/data/bills.ts`: supplier bills (OWNER, STOREROOM_MANAGER: create/edit/delete while UNPAID, mark paid with date + note, mark unpaid), platform bills (PLATFORM_ADMIN only; the OWNER reads them), computed overdue, unpaid/overdue totals, admin shop list (owner email, status, unpaid platform bills) and suspend/activate.
+- Screens: Owner and Store Room → Bills (filters: status All/Unpaid/Overdue/Paid, supplier, date range; totals; one-click Mark paid with a confirm; detail page with edit/delete/mark unpaid; CSV); Owner → Billing (platform bills, read-only, CSV); `/admin` (totals, shop search, shop list) and `/admin/shops/:id` (Suspend/Activate, add/edit/delete/mark paid/unpaid platform bills, CSV).
+- `/api/bills/export` (role-based CSV, with formula-injection protection).
+- Seed: 3 supplier bills (paid, overdue, due soon) and 3 platform bills (the demo shop has one overdue).
+
+**Run**: `pnpm test` (adds `tests/unit/bills.test.ts`: staff see no bills, manager no platform bills, owner read-only, admin-only platform writes, paid bills locked, overdue computed, tenant isolation, CSV access)
+
+**Check by hand**
+- [ ] storeroom@demo.test → Bills: TS-118 shows a red "Overdue" chip; the totals show unpaid and overdue. Mark paid with a note → it is locked (no Edit/Delete) until Mark unpaid.
+- [ ] Filter Overdue; set a date range; Export CSV opens in Excel with ₹ amounts as numbers.
+- [ ] owner@demo.test → Billing: BB-2026-10 is overdue with no buttons (read-only).
+- [ ] admin@demo.test → Shops → Demo Baby Shop → Mark paid BB-2026-10. Then Suspend the shop. owner@demo.test sees the red suspended banner, can browse, and any save fails with "This shop is suspended". Activate it again.
+- [ ] storea@demo.test has no Bills menu; `/api/bills/export?kind=supplier` returns 403.
