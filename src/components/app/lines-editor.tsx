@@ -22,6 +22,8 @@ export interface Line {
   cost?: string;
   /** Stock at the source location, when known. */
   available?: number;
+  /** Selling price in paise (label preview). */
+  price?: number;
 }
 
 /**
@@ -34,6 +36,7 @@ export function LinesEditor({
   showCost,
   availableAt,
   emptyHint = "Search or scan products to add them.",
+  qtyLabel = "Qty",
 }: {
   lines: Line[];
   onChange: (l: Line[]) => void;
@@ -41,6 +44,7 @@ export function LinesEditor({
   /** Location id: shows "available" and warns when a line asks for more. */
   availableAt?: string;
   emptyHint?: string;
+  qtyLabel?: string;
 }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<PickerProduct[]>([]);
@@ -82,7 +86,7 @@ export function LinesEditor({
   };
 
   const pick = (p: PickerProduct) => {
-    add({ productId: p.id, name: p.name, sku: p.sku, barcode: p.barcode, available: p.available });
+    add({ productId: p.id, name: p.name, sku: p.sku, barcode: p.barcode, available: p.available, price: p.sellingPrice });
     setQ("");
     setResults([]);
     setOpen(false);
@@ -96,7 +100,7 @@ export function LinesEditor({
     if (res && res.ok && res.data) {
       const p = res.data.product;
       const available = availableAt ? res.data.levels.find((l) => l.locationId === availableAt)?.quantity : undefined;
-      add({ productId: p.id, name: p.name, sku: p.sku, barcode: p.barcode, available });
+      add({ productId: p.id, name: p.name, sku: p.sku, barcode: p.barcode, available, price: p.sellingPrice });
       setQ("");
       setResults([]);
       setOpen(false);
@@ -185,7 +189,7 @@ export function LinesEditor({
                 </div>
                 <div className="flex items-end gap-2">
                   <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                    Qty
+                    {qtyLabel}
                     <Input
                       className={cn("num h-11 w-20 text-right", over && "border-destructive")}
                       inputMode="numeric"
@@ -229,7 +233,7 @@ export function LinesEditor({
         mode="pick"
         title="Scan products"
         onPick={({ product, quantity }) => {
-          add({ productId: product.id, name: product.name, sku: product.sku, barcode: product.barcode }, quantity);
+          add({ productId: product.id, name: product.name, sku: product.sku, barcode: product.barcode, price: product.sellingPrice }, quantity);
           toast.success(`Added ${quantity} × ${product.name}`);
         }}
       />

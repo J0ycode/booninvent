@@ -127,3 +127,19 @@ pnpm e2e         # first time: pnpm exec playwright install chromium webkit
 - [ ] storea@demo.test → Request Restock → Suggest restock now lists low items (Store A sold some).
 - [ ] storea → Return or Report Damaged → Damaged 1 piece → Pending. storeroom (or owner → Approvals) approves → Store A qty drops by 1.
 - [ ] storeroom → Returns and Damaged → record "Return to supplier" → Store Room qty drops at once.
+
+---
+
+## Phase 7: Barcode label sheets
+
+**Built**
+- `src/lib/label-presets.ts` (24/40/65 A4 layouts), `src/server/pdf/labels.ts` (name, price, SKU, Code 128 + code text per label; multi-page; start position), `POST /api/labels` (managers only; writes `labelPrintLog` + audit).
+- Screen: Store Room → Barcode Labels: pick products or "From a recent receipt" (one label per received piece, editable), preset, a clickable start-position grid, a live first-sheet preview with real barcodes, Print and Download PDF. A receipt's "Print labels" button opens this screen with the receipt chosen.
+
+**Run**: `pnpm test` (adds `tests/unit/labels.test.ts`)
+
+**Check by hand** (storeroom@demo.test)
+- [ ] Barcode Labels → From a recent receipt → RCV-00002 → counts are pre-filled.
+- [ ] Switch to 65 per sheet, tap slot 7: the preview leaves 1-6 empty.
+- [ ] Download the PDF and print one sheet at 100% on plain paper; hold it against a sticker sheet. Scan a printed barcode with the phone scanner: the product is found.
+- [ ] Print on desktop opens the print dialog; on a phone it opens the PDF.

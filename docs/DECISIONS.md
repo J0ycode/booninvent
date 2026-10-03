@@ -42,3 +42,7 @@ Each entry: decision, reason, alternative considered.
 | 36 | API key format `bbk_` + 40 random chars, SHA-256 hashed, one active key per shop, rotate = revoke old | Simple to use; secure at rest | Multiple named keys |
 | 37 | Sales API: duplicate `externalRef` → 200 with `duplicate: true`; a failed sale does not reserve the `externalRef` | Safe retries; a corrected retry can still go through | 409 on duplicates |
 | 38 | API-key calls run with an empty userId (movements and audit show userId null, audit action `sale.api`) | No fake user; audit still shows the source | A system user record |
+| 39 | Label presets: 24 = 3×8 at 70×37 mm, 40 = 4×10 at 52.5×29.7 mm, 65 = 5×13 at 38.1×21.2 mm (common A4 sticker sheets) | Matches widely sold sheets; one config shared by preview and PDF | Custom sizes |
+| 40 | Labels are generated server-side (`POST /api/labels`) and logged on every Print/Download; prices print as "Rs." | One source of truth; the built-in PDF fonts cannot draw "₹" | Client-side PDF |
+| 41 | Print on phones opens the PDF in the system viewer; on desktop it prints from a hidden frame | Mobile browsers cannot print an iframe | Download only |
+| 42 | Up to 2,000 labels per job | Keeps PDF generation fast on serverless | Unlimited |
