@@ -30,3 +30,7 @@ Each entry: decision, reason, alternative considered.
 | 24 | A cost entered on a receipt line also becomes the product's current cost price | Keeps cost current without a separate edit | Cost history only on receipts |
 | 25 | Duplicate product lines in one document are merged | One line per product keeps documents and the ledger clear | Allowing duplicates |
 | 26 | Movements store `balanceAfter` | Stock history shows running balances without recomputing | Computing on read |
+| 27 | Writing off a dispatch discrepancy records RETURN_IN then DAMAGE at the Store Room (net 0) | In-transit pieces are at no location; two ledger rows show exactly what happened, and every movement has a non-zero delta | A zero-delta movement |
+| 28 | Store receipt: received + missing + damaged must equal sent per line, and a note is required when anything is flagged | Every piece is accounted for | Free entry |
+| 29 | OWNER can also confirm a store receipt (besides the store's staff) | Covers a store with no staff signed in | Staff only |
+| 30 | Dispatch note PDF is served from `/api/dispatches/:id/note` (A4, pdf-lib, Code 128 of the dispatch number) | Printable, shareable, works on phones | Browser print of the HTML page |

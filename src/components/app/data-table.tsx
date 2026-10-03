@@ -31,6 +31,7 @@ export function DataTable({ columns, rows, caption }: { columns: DTColumn[]; row
     cell: ({ row }) => row.original.cells[c.id] ?? null,
     meta: c,
   }));
+  // eslint-disable-next-line react-hooks/incompatible-library -- cells are pre-rendered; nothing memoized depends on table functions
   const table = useReactTable({ data: rows, columns: defs, getCoreRowModel: getCoreRowModel(), getRowId: (r) => r.id });
   const primary = columns.find((c) => c.primary) ?? columns[0];
 

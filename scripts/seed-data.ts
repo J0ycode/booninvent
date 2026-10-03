@@ -3,6 +3,7 @@ import type { TenantCtx } from "@/server/context";
 import { saveSupplier, listSuppliers } from "@/server/data/suppliers";
 import { importProducts, listProducts } from "@/server/data/products";
 import { receiveStock } from "@/server/stock/receipts";
+import { saveDraft, sendDispatch, receiveDispatch } from "@/server/stock/dispatches";
 import { User } from "@/server/models/core";
 
 export interface SeedTenant {
@@ -91,4 +92,27 @@ export async function seedCatalogAndStock(_t: SeedTenant) {
     lines: accessories.slice(2).map((p, i) => ({ productId: p.id, quantity: 12 + i * 3 })),
   });
   console.log("Seeded 2 receipts.");
+
+  // Phase 4: dispatches to the stores.
+  const storeA = String(_t.stores[0]._id);
+  const storeB = String(_t.stores[1]._id);
+  const staffA = await ctxFor("storea@demo.test");
+  const staffB = await ctxFor("storeb@demo.test");
+  const send = async (to: string, items: typeof clothing, n: number) =>
+    sendDispatch(manager, (await saveDraft(manager, null, { toLocationId: to, lines: items.map((p) => ({ productId: p.id, quantity: n })) })).id);
+  const full = (d: Awaited<ReturnType<typeof send>>) => ({ lines: d.lines.map((l) => ({ lineId: l.id, receivedQty: l.quantity, missingQty: 0, damagedQty: 0 })) });
+
+  const d1 = await send(storeA, clothing.slice(0, 20), 6);
+  await receiveDispatch(staffA, d1.id, full(d1));
+  const d2 = await send(storeB, clothing.slice(10, 30), 5);
+  await receiveDispatch(staffB, d2.id, full(d2));
+  const d3 = await send(storeA, [...clothing.slice(20, 24), ...accessories.slice(2, 6)], 4);
+  await receiveDispatch(staffA, d3.id, {
+    lines: d3.lines.map((l, i) =>
+      i === 0 ? { lineId: l.id, receivedQty: 2, missingQty: 1, damagedQty: 1, note: "1 short, 1 torn seam" } : { lineId: l.id, receivedQty: l.quantity, missingQty: 0, damagedQty: 0 },
+    ),
+  });
+  await send(storeB, accessories.slice(2, 8), 3); // in transit
+  await saveDraft(manager, null, { toLocationId: storeA, lines: clothing.slice(30, 33).map((p) => ({ productId: p.id, quantity: 2 })) });
+  console.log("Seeded 5 dispatches.");
 }

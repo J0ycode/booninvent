@@ -70,3 +70,23 @@ pnpm e2e         # first time: pnpm exec playwright install chromium webkit
 - [ ] Type a barcode from the products list into the add box and press Enter: the line is added (like a USB scanner).
 - [ ] Double-tap "Receive stock" on a slow connection: only one receipt is created.
 - [ ] Phone: the camera button in the add box opens the scanner with a quantity stepper and "Add".
+
+---
+
+## Phase 4: Dispatch, store receipt, discrepancies
+
+**Built**
+- `src/server/stock/dispatches.ts`: draft create/edit/discard (no stock), send (DRAFT → DISPATCHED, DISPATCH_OUT from the Store Room), store receipt (received/missing/damaged per line + note; DISPATCH_IN of good pieces; RECEIVED or RECEIVED_WITH_ISSUES), discrepancy resolution by the Store Room (Return to stock = RETURN_IN; Write off = RETURN_IN + DAMAGE) → RESOLVED when all lines are done.
+- STORE_STAFF see only dispatches to their store and never drafts.
+- Screens: Store Room Dispatch list (status/store filters), New dispatch (lines editor with Store Room availability), draft edit/send/discard, dispatch detail with per-line resolve buttons, Dispatch note PDF. Store: Incoming Dispatches (to confirm + history) and a receive form (defaults to everything received; flag missing/damaged with a note).
+- Seed: received, received-with-issues, in-transit and draft dispatches.
+
+**Run**: `pnpm test` (adds `tests/unit/dispatch.test.ts`)
+
+**Check by hand**
+- [ ] storeroom@demo.test → Dispatch → New → Store B, add 2 products → Save draft → Send. Store Room qty drops.
+- [ ] Try to send more than available: the line turns red, and the server refuses with a plain message.
+- [ ] storeb@demo.test → Incoming → open the new dispatch → set 1 damaged with a note → Confirm with issues.
+- [ ] storeroom → Dispatch → filter "Received with issues" → Return to stock / Write off; it becomes Resolved.
+- [ ] Open "Dispatch note (PDF)" on a phone and a desktop.
+- [ ] storea@demo.test cannot open a Store B dispatch URL (404).
