@@ -3,3 +3,6 @@ allowBuilds:
   unrs-resolver: false
   esbuild: true
   mongodb-memory-server: true
+minimumReleaseAgeExclude:
+  - electron-to-chromium
+  - ip-address
