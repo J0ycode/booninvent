@@ -46,6 +46,7 @@ Working agreement: the user runs tests. Claude writes the tests, runs only lint 
 3. Movement types: RECEIPT, DISPATCH_OUT, DISPATCH_IN, SALE, RETURN_OUT, RETURN_IN, DAMAGE, SUPPLIER_RETURN, ADJUSTMENT.
 4. Every state change writes auditLog. Every mutation accepts an idempotency key (`useAction` sends one; buttons are disabled while pending).
 5. Sales are idempotent on `(tenantId, externalRef)`.
+6. Inside a transaction, run queries one after another. Never use `Promise.all` on the same session (MongoDB rejects it).
 
 ## Conventions
 - Money is integer **paise** in the DB, shown with `money()`. Quantities are whole pieces (`num` class for tabular numbers).

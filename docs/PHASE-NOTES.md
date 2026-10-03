@@ -50,3 +50,23 @@ pnpm e2e         # first time: pnpm exec playwright install chromium webkit
 - [ ] Import: download the template, import it, see the preview, then import. Break a row (e.g. category "Shoes") and import is blocked with row errors.
 - [ ] Phone: tap Scan in the bottom bar and allow the camera; scanning a printed barcode shows the item card with stock. Deny the camera and you can type the code.
 - [ ] storea@demo.test: Scan shows only Store A stock and no cost anywhere.
+
+---
+
+## Phase 3: Stock module + Receive Stock
+
+**Built**
+- `src/server/stock/core.ts` `applyMoves()`: the only quantity writer. Products and locations must belong to the tenant; decrements are atomic conditional updates (`quantity >= n`) that fail with a plain message ("Not enough stock: Romper has 3 at Store Room, but 5 are needed."); every change appends a movement with `balanceAfter` in the same transaction. The ledger model blocks updates and deletes.
+- `receiveStock()` (OWNER, STOREROOM_MANAGER): supplier + invoice + lines (qty, optional cost) → RCV-00001, RECEIPT movements, audit, idempotent.
+- Stock reads (`src/server/stock/read.ts`): levels, totals, movements; STORE_STAFF restricted to their store.
+- Screens: Receive Stock (supplier, invoice, a lines editor with search, camera scan, USB scan + Enter, quantity and cost) with recent receipts; receipt detail with a "Print labels" link (labels come in Phase 7).
+- Shared `LinesEditor`, reused by dispatch and restock.
+- Seed: two receipts, so the Store Room has stock (two accessories left at 0).
+
+**Run**: `pnpm test` (adds `tests/unit/stock.test.ts`: negative stock blocked + rollback, concurrency cannot oversell, ledger sums equal levels, append-only, idempotency, roles, tenant/store scoping).
+
+**Check by hand** (storeroom@demo.test)
+- [ ] Receive Stock: pick a supplier, type an invoice no., search "bib", add it, set qty 5 → saved as RCV-00003 and the product's Store Room qty goes up by 5.
+- [ ] Type a barcode from the products list into the add box and press Enter: the line is added (like a USB scanner).
+- [ ] Double-tap "Receive stock" on a slow connection: only one receipt is created.
+- [ ] Phone: the camera button in the add box opens the scanner with a quantity stepper and "Add".

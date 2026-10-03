@@ -26,3 +26,7 @@ Each entry: decision, reason, alternative considered.
 | 20 | Product search: exact barcode, SKU prefix, or case-insensitive name contains, over an indexed lowercase name; 25 per page | Fast enough for 5,000 products per tenant without a search engine | Atlas Search |
 | 21 | Native checkbox and select controls in forms | Reliable FormData and the native phone pickers | Base UI checkbox/select |
 | 22 | Store staff see only active products and never see cost (the `costPrice` key is absent) | Cost-price rule; inactive products are hidden from stores | A null cost value |
+| 23 | Workflow functions that change stock (receipts, dispatches, returns, sales) live in `src/server/stock/*` next to `applyMoves` | One module owns every quantity change, as the brief requires | Workflows in the data layer calling a stock API |
+| 24 | A cost entered on a receipt line also becomes the product's current cost price | Keeps cost current without a separate edit | Cost history only on receipts |
+| 25 | Duplicate product lines in one document are merged | One line per product keeps documents and the ledger clear | Allowing duplicates |
+| 26 | Movements store `balanceAfter` | Stock history shows running balances without recomputing | Computing on read |

@@ -1,7 +1,8 @@
 import type { Types } from "mongoose";
 import type { TenantCtx } from "@/server/context";
-import { saveSupplier } from "@/server/data/suppliers";
-import { importProducts } from "@/server/data/products";
+import { saveSupplier, listSuppliers } from "@/server/data/suppliers";
+import { importProducts, listProducts } from "@/server/data/products";
+import { receiveStock } from "@/server/stock/receipts";
 import { User } from "@/server/models/core";
 
 export interface SeedTenant {
@@ -72,4 +73,22 @@ export async function seedCatalogAndStock(_t: SeedTenant) {
   const res = await importProducts(manager, rows, true);
   if (res.errorCount) throw new Error(`Seed products invalid: ${JSON.stringify(res.results.filter((r) => r.errors.length).slice(0, 3))}`);
   console.log(`Seeded ${res.imported} products.`);
+
+  // Phase 3: two supplier deliveries into the Store Room.
+  const all = (await listProducts(manager, { pageSize: 100 })).rows;
+  const clothing = all.filter((p) => p.category === "CLOTHING");
+  const accessories = all.filter((p) => p.category === "ACCESSORY");
+  await receiveStock(manager, {
+    supplierId: s1.id,
+    invoiceNumber: "LT-2041",
+    lines: clothing.map((p, i) => ({ productId: p.id, quantity: 20 + (i % 5) * 4, cost: p.costPrice ?? null })),
+  });
+  const s2 = (await listSuppliers(manager)).find((x) => x.name === "Tiny Steps Accessories")!;
+  await receiveStock(manager, {
+    supplierId: s2.id,
+    invoiceNumber: "TS-118",
+    // Leave two accessories at zero so low stock shows up.
+    lines: accessories.slice(2).map((p, i) => ({ productId: p.id, quantity: 12 + i * 3 })),
+  });
+  console.log("Seeded 2 receipts.");
 }
