@@ -8,7 +8,7 @@ Works on phone, tablet and desktop, and installs as an app (PWA).
 |---|---|---|
 | `/storeroom` | Store Room manager | Dashboard, Products (+ suppliers, CSV import), Receive Stock, Dispatch, Restock Requests, Returns and Damaged, Barcode Labels, Bills, Reports |
 | `/store` | Store staff (one store) | Dashboard, My Stock, Incoming Dispatches, Request Restock, Return or Report Damaged, Stock History |
-| `/owner` | Shop owner | Dashboard (all locations), Reports, Approvals, Bills, Billing, Users and Locations, Settings (company, API key) |
+| `/owner` | Shop owner | Dashboard (all locations), Reports, Approvals, Bills, Billing, Users and Locations, Activity Log, Settings (company, email alerts, API key) |
 | `/admin` | Platform admin | Shops, platform bills, suspend/activate |
 
 ---
@@ -87,6 +87,7 @@ Husky runs `lint` and `typecheck` on every commit. GitHub Actions (`.github/work
 | `SESSION_SECRET` | yes | 32+ random characters used to sign session cookies. Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Changing it signs everyone out |
 | `APP_URL` | yes in production | Public URL, used in invite and password-reset links (e.g. `https://booninvent.vercel.app`) |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | for real emails | SMTP for invites and password resets. Without `SMTP_HOST`, emails are printed to the server log |
+| `CRON_SECRET` | for the daily email | 16+ random characters. Protects `GET /api/cron/low-stock`, which sends the optional daily low-stock email. On Vercel, set it as an environment variable and Vercel Cron sends it automatically (schedule in `vercel.json`: 02:30 UTC, 8:00 am India). Empty = the job is off |
 | `ERROR_WEBHOOK_URL` | optional | Every server error is also POSTed here as JSON (e.g. a Slack/Discord incoming webhook) |
 
 Never commit `.env.local`. `.env.example` lists every variable.
@@ -147,7 +148,8 @@ More detail: [`docs/SALES_API.md`](docs/SALES_API.md).
    - Create the platform admin from your machine against the production database: `DATABASE_URL=… pnpm create-platform-admin admin@yourdomain.com '…'`.
    - Optional demo data: `pnpm seed` with the production `DATABASE_URL` (creates only the demo shops). Skip this for a real launch.
    - Shops sign up at `/signup`.
-4. Every push to `main` deploys automatically. Pull requests get preview URLs.
+4. Every push to `main` deploys automatically. Pull requests get preview URLs. When a change adds a file to `drizzle/`, run `pnpm db:migrate` against the production database **before** the deploy goes live.
+5. **Daily low-stock email (optional):** set `CRON_SECRET` and the SMTP variables. Each owner switches the email on in Settings. On another host, call `GET /api/cron/low-stock` once a day with the header `Authorization: Bearer <CRON_SECRET>`.
 
 **Install note:** `pnpm-workspace.yaml` sets `minimumReleaseAgeExclude` for two transitive packages that were newer than pnpm's 1-day safety window at the time. Remove those lines once they are older.
 
@@ -163,7 +165,7 @@ More detail: [`docs/SALES_API.md`](docs/SALES_API.md).
 - Server errors are logged as one JSON line each (`src/instrumentation.ts`). See them in Vercel → Project → Logs (filter `level":"error`).
 - Set `ERROR_WEBHOOK_URL` to also receive each error in Slack/Discord or a log service.
 - Users see a friendly error page with **Try again**, and a code (digest) that matches the log line.
-- Every state change is recorded in the `audit_logs` table (who, what, when).
+- Every state change is recorded in the `audit_logs` table (who, what, when). Owners read it at **Activity Log**.
 
 ---
 

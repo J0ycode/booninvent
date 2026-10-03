@@ -42,6 +42,7 @@ export const NAV: Record<Role, PortalNav> = {
       { href: "/owner/bills", label: "Bills", icon: "receipt" },
       { href: "/owner/billing", label: "Billing", icon: "wallet" },
       { href: "/owner/users", label: "Users and Locations", icon: "users" },
+      { href: "/owner/activity", label: "Activity Log", icon: "history" },
       { href: "/owner/settings", label: "Settings", icon: "settings" },
     ],
     bottom: { home: "/owner", stock: "/owner/reports", requests: "/owner/approvals", scan: true },

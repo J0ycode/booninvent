@@ -15,6 +15,8 @@ export interface TenantView {
   slug: string;
   status: "ACTIVE" | "SUSPENDED";
   company: { address?: string; phone?: string; email?: string; gstin?: string };
+  /** Daily low-stock summary email to the owners. */
+  lowStockEmail: boolean;
 }
 
 export async function getMyTenant(ctx: Ctx | null): Promise<TenantView> {
@@ -22,7 +24,7 @@ export async function getMyTenant(ctx: Ctx | null): Promise<TenantView> {
   const db = await getDb();
   const [t] = await db.select().from(tenants).where(eq(tenants.id, c.tenantId));
   if (!t) throw new AppError("NOT_FOUND", "Shop not found.");
-  return { id: t.id, name: t.name, slug: t.slug, status: t.status, company: t.company ?? {} };
+  return { id: t.id, name: t.name, slug: t.slug, status: t.status, company: t.company ?? {}, lowStockEmail: t.lowStockEmail };
 }
 
 export const companySchema = z.object({
@@ -42,5 +44,15 @@ export async function updateCompany(ctx: Ctx | null, input: unknown, idempotency
       .set({ name: d.name, company: { address: d.address, phone: d.phone, email: d.email, gstin: d.gstin } })
       .where(eq(tenants.id, c.tenantId));
     return { result: null, entityId: c.tenantId, audit: d };
+  });
+}
+
+/** Switches the daily low-stock summary email on or off for this shop. */
+export async function setLowStockEmail(ctx: Ctx | null, input: unknown, idempotencyKey?: string) {
+  const c = await guard(ctx, ["OWNER"]);
+  const { enabled } = z.object({ enabled: z.boolean() }).parse(input);
+  return runMutation(c, { action: "tenant.low_stock_email", entity: "tenant", idempotencyKey }, async (tx) => {
+    await tx.update(tenants).set({ lowStockEmail: enabled }).where(eq(tenants.id, c.tenantId));
+    return { result: { enabled }, entityId: c.tenantId, audit: { enabled } };
   });
 }

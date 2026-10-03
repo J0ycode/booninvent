@@ -250,3 +250,29 @@ Lighthouse (Chrome DevTools → Lighthouse → Mobile) on /login, /store, /store
 3. `pnpm test` and `pnpm e2e` (no database setup needed for either).
 4. In Supabase -> Table Editor, confirm every table shows "RLS enabled".
 5. Go-live: add `DATABASE_URL` in Vercel (Production and Preview), merge `supabase` into `main`, and create the platform admin with `pnpm create-platform-admin`. `MONGODB_URI` can then be removed from Vercel and the Atlas cluster deleted.
+
+---
+
+## Audit follow-ups (branch `supabase`)
+
+Source: `docs/audit/COMPLETE_AUDIT_REPORT.md`.
+
+- **FND-01 (8 failing unit tests):** the test helper `expectCode` now counts a raw form-validation error as `VALIDATION`, as the app does.
+- **Activity Log** (`/owner/activity`, owner only): every change in the shop, with filters for area, person, date range and a text search.
+- **Daily low-stock email:** switch in Owner -> Settings -> Email alerts. Off by default.
+- **Report columns:** a "Columns" panel on Reports chooses which columns appear in the preview and in the CSV.
+- **Theme persistence:** already worked; nothing changed.
+- New migration `drizzle/0002_low_stock_email.sql` (two columns on `tenants`). **Run `pnpm db:migrate` before deploying this code**, otherwise pages that read the shop fail until the columns exist.
+
+**Checked by Claude:** typecheck, lint; on the running app against Supabase: the Activity Log and its filters, another shop sees none of it, the Store Room manager is redirected away, the Settings switch renders, chosen columns apply to the preview and the CSV, the cron route refuses calls without the secret.
+
+**Not checked:** the unit tests (new file `tests/unit/improvements.test.ts`), and a real email delivery.
+
+### To do (you)
+1. `pnpm test`.
+2. Owner -> Activity Log: try each filter on a phone and on desktop.
+3. Owner -> Settings: turn the email on. To send one now, set `CRON_SECRET` in `.env.local`, restart `pnpm dev`, and run:
+   `curl -H "Authorization: Bearer <your secret>" http://localhost:3000/api/cron/low-stock`
+   Without SMTP settings the email text is printed in the server log.
+4. Reports: untick some columns, check the preview, download the CSV.
+5. Go-live: add `CRON_SECRET` in Vercel. The schedule in `vercel.json` then runs by itself once a day.

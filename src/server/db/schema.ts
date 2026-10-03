@@ -40,6 +40,9 @@ export const tenants = pgTable("tenants", {
   slug: text("slug").notNull().unique(),
   status: text("status").$type<TenantStatus>().notNull().default("ACTIVE"),
   company: jsonb("company").$type<{ address?: string; phone?: string; email?: string; gstin?: string }>().notNull().default({}),
+  // Optional daily low-stock summary email to the owners. sent_on is the India-time day ("2026-10-03") of the last run.
+  lowStockEmail: boolean("low_stock_email").notNull().default(false),
+  lowStockEmailSentOn: text("low_stock_email_sent_on"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

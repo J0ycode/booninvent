@@ -29,6 +29,7 @@ Working agreement: the user runs tests. Claude writes the tests, runs only lint 
 - `src/server/stock/*`: the only code that changes quantities.
 - `src/server/mutation.ts`: `runMutation()` = suspended check + transaction + idempotency key + auditLog.
 - `src/server/context.ts`: `getCtx()` (pages/actions), `ctxFromRequest()` (route handlers). `src/server/tenancy.ts`: the one place a tenant is resolved.
+- `src/server/data/alerts.ts` + `src/app/api/cron/low-stock`: the scheduled daily low-stock email (no signed-in user; protected by `CRON_SECRET`, runs per shop with a read-only machine context).
 - `src/app/{admin,owner,storeroom,store}`: portals. Each page is a server component and calls data functions; client parts call server actions in a sibling `actions.ts`.
 - `src/components/app/*`: the shared component set (PageHeader, DataTable, StatusChip/Status, StatCard, EmptyState, ConfirmDialog, Field/NativeSelect/ActionBar, Section, Pagination, AppShell, ScannerSheet).
 

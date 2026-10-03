@@ -4,6 +4,7 @@ import { Section } from "./section";
 import { DataTable } from "./data-table";
 import { EmptyState } from "./empty-state";
 import { FilterBar, UrlSelect, UrlDate } from "./url-filters";
+import { ColumnPicker } from "./column-picker";
 import { buttonVariants } from "@/components/ui/button";
 import { getCtx } from "@/server/context";
 import { buildReport, REPORT_TYPES, type ReportType } from "@/server/data/reports";
@@ -21,10 +22,14 @@ export async function ReportsPage({ sp }: { sp: SP }) {
   const location = str(sp.location);
   const from = str(sp.from);
   const to = str(sp.to);
-  const [report, locations] = await Promise.all([buildReport(ctx, { type, location, from, to }), listLocations(ctx)]);
+  const cols = str(sp.cols);
+  const [report, locations] = await Promise.all([buildReport(ctx, { type, location, from, to, cols }), listLocations(ctx)]);
   const usesDates = ["dispatches", "returns", "movements", "bills"].includes(type);
   const usesLocation = type !== "bills";
-  const qs = new URLSearchParams(Object.fromEntries(Object.entries({ location, from, to }).filter(([, v]) => v)) as Record<string, string>);
+  const qs = new URLSearchParams(Object.fromEntries(Object.entries({ location, from, to, cols }).filter(([, v]) => v)) as Record<string, string>);
+  // Card title on phones: the product/document name when it is shown, otherwise the first chosen column.
+  const preferred = type === "low" ? report.allColumns[1]?.key : report.allColumns[0]?.key;
+  const primaryKey = report.columns.some((c) => c.key === preferred) ? preferred : report.columns[0]?.key;
   const locationOptions =
     type === "dispatches"
       ? locations.filter((l) => l.type === "STORE")
@@ -34,7 +39,7 @@ export async function ReportsPage({ sp }: { sp: SP }) {
     <>
       <PageHeader
         title="Reports"
-        description="Choose a report and filters, check the preview, then download the CSV."
+        description="Choose a report, filters and columns, check the preview, then download the CSV."
         actions={
           <a href={`/api/reports/${type}?${qs.toString()}`} className={buttonVariants()}>
             <Download /> Download CSV
@@ -47,6 +52,8 @@ export async function ReportsPage({ sp }: { sp: SP }) {
         {usesDates && <UrlDate name="from" label="From" />}
         {usesDates && <UrlDate name="to" label="To" />}
       </FilterBar>
+      {/* key: a different report has different columns, so the picker starts fresh. */}
+      <ColumnPicker key={type} columns={report.allColumns.map((c) => ({ key: c.key, header: c.header }))} selected={report.columns.map((c) => c.key)} />
       <Section title={`${report.title} · ${qtyFmt(report.rows.length)} rows`}>
         {report.rows.length === 0 ? (
           <EmptyState title="No rows" description="Nothing matches these filters." />
@@ -54,7 +61,7 @@ export async function ReportsPage({ sp }: { sp: SP }) {
           <>
             <DataTable
               caption={report.title}
-              columns={report.columns.map((c, i) => ({ id: c.key, header: c.header, align: c.numeric ? ("right" as const) : undefined, primary: i === (type === "low" ? 1 : 0) }))}
+              columns={report.columns.map((c) => ({ id: c.key, header: c.header, align: c.numeric ? ("right" as const) : undefined, primary: c.key === primaryKey }))}
               rows={report.rows.slice(0, PREVIEW).map((r, i) => ({ id: String(i), cells: Object.fromEntries(report.columns.map((c) => [c.key, String(r[c.key] ?? "")])) }))}
             />
             {(report.rows.length > PREVIEW || report.truncated) && (

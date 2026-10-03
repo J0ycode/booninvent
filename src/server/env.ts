@@ -15,6 +15,10 @@ export const env = {
     if (s.length < 32) throw new Error("SESSION_SECRET must be at least 32 characters.");
     return s;
   },
+  /** Shared secret for scheduled jobs (Vercel Cron sends it as a Bearer token). Unset = scheduled jobs are off. */
+  get cronSecret() {
+    return process.env.CRON_SECRET || null;
+  },
   get appUrl() {
     return process.env.APP_URL ?? "http://localhost:3000";
   },

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getCtx } from "@/server/context";
 import { toResult } from "@/server/action";
-import { updateCompany } from "@/server/data/tenant";
+import { updateCompany, setLowStockEmail } from "@/server/data/tenant";
 import { rotateApiKey, revokeApiKey } from "@/server/data/apikeys";
 
 export async function updateCompanyAction(key: string, input: unknown) {
@@ -25,6 +25,14 @@ export async function rotateApiKeyAction(key: string) {
 export async function revokeApiKeyAction(key: string) {
   return toResult(async () => {
     const r = await revokeApiKey(await getCtx(), key);
+    revalidatePath("/owner/settings");
+    return r;
+  });
+}
+
+export async function setLowStockEmailAction(key: string, enabled: boolean) {
+  return toResult(async () => {
+    const r = await setLowStockEmail(await getCtx(), { enabled }, key);
     revalidatePath("/owner/settings");
     return r;
   });

@@ -42,20 +42,37 @@ export interface Report {
   rows: Record<string, string | number>[];
   truncated: boolean;
 }
+/** A report after the column choice was applied. allColumns is what the picker offers. */
+export interface PickedReport extends Report {
+  allColumns: ReportColumn[];
+}
 
 export const reportQuerySchema = z.object({
   type: z.enum(Object.keys(REPORT_TYPES) as [ReportType, ...ReportType[]]),
   location: z.string().optional(),
   from: z.string().optional(),
   to: z.string().optional(),
+  /** Comma-separated column keys to keep, in report order. Empty = every column. */
+  cols: z.string().max(2000).optional(),
 });
+
+/**
+ * Builds a report and keeps only the chosen columns (for the preview and the CSV).
+ * Unknown keys are ignored; if none of the chosen keys exist, every column is kept.
+ */
+export async function buildReport(ctx: Ctx | null, input: unknown): Promise<PickedReport> {
+  const report = await buildFullReport(ctx, input);
+  const wanted = new Set((reportQuerySchema.parse(input).cols ?? "").split(",").filter(Boolean));
+  const kept = report.columns.filter((c) => wanted.has(c.key));
+  return { ...report, allColumns: report.columns, columns: kept.length ? kept : report.columns };
+}
 
 const MAX_ROWS = 5000;
 const rupees = (paise: number | null | undefined) => (paise == null ? "" : (paise / 100).toFixed(2));
 const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" }) : "");
 const day = (iso: string | null | undefined) => (iso ? isoDay(new Date(iso)) : "");
 
-export async function buildReport(ctx: Ctx | null, input: unknown): Promise<Report> {
+async function buildFullReport(ctx: Ctx | null, input: unknown): Promise<Report> {
   const c = await guard(ctx, ["OWNER", "STOREROOM_MANAGER"]);
   const q = reportQuerySchema.parse(input);
   const locations = await listLocations(c);

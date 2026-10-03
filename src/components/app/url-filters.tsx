@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useTransition } from "react";
+import { useRef, useTransition } from "react";
 import { NativeSelect } from "./form-field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -51,6 +51,39 @@ export function UrlDate({ name, label }: { name: string; label: string }) {
         {label}
       </Label>
       <Input id={id} type="date" value={sp.get(name) ?? ""} onChange={(e) => set(name, e.target.value)} />
+    </div>
+  );
+}
+
+/** A search box bound to one URL search param. Applies shortly after typing stops, or at once on Enter. */
+export function UrlSearch({ name, label, placeholder }: { name: string; label: string; placeholder?: string }) {
+  const { set, sp } = useSetParam();
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const id = `f-${name}`;
+  const apply = (value: string) => {
+    if (timer.current) clearTimeout(timer.current);
+    if (value.trim() !== (sp.get(name) ?? "")) set(name, value.trim());
+  };
+  return (
+    <div className="col-span-2 flex min-w-0 flex-col gap-1 sm:!w-64">
+      <Label htmlFor={id} className="text-xs text-muted-foreground">
+        {label}
+      </Label>
+      <Input
+        id={id}
+        type="search"
+        enterKeyHint="search"
+        placeholder={placeholder}
+        defaultValue={sp.get(name) ?? ""}
+        onChange={(e) => {
+          const value = e.target.value;
+          if (timer.current) clearTimeout(timer.current);
+          timer.current = setTimeout(() => apply(value), 400);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") apply(e.currentTarget.value);
+        }}
+      />
     </div>
   );
 }
