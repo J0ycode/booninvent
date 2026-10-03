@@ -1,22 +1,30 @@
-import { afterAll, beforeAll, beforeEach, inject, vi } from "vitest";
-import mongoose from "mongoose";
-import { connectDb, disconnectDb } from "@/server/db";
+import { afterAll, beforeAll, beforeEach, vi } from "vitest";
+import { getTableName, is, sql } from "drizzle-orm";
+import { PgTable } from "drizzle-orm/pg-core";
+import { getDb, disconnectDb } from "@/server/db";
+import * as schema from "@/server/db/schema";
+import * as stockSchema from "@/server/db/stock-schema";
 
-process.env.MONGODB_URI = inject("mongoUri");
+// Embedded in-memory Postgres (PGlite): no setup needed, the migrations in ./drizzle are applied on start.
+process.env.DATABASE_URL = "pglite://memory";
 process.env.SESSION_SECRET = "test-secret-test-secret-test-secret-123";
 
 // next/headers and next/cache are not available outside a request in tests.
 vi.mock("next/cache", () => ({ revalidatePath: () => {}, revalidateTag: () => {}, updateTag: () => {} }));
 
+const TABLES = ([...Object.values(schema), ...Object.values(stockSchema)] as unknown[])
+  .filter((t): t is PgTable => is(t, PgTable))
+  .map((t) => `"${getTableName(t)}"`)
+  .join(", ");
+
 beforeAll(async () => {
-  await connectDb(process.env.MONGODB_URI);
-  await Promise.all(mongoose.modelNames().map((n) => mongoose.model(n).createIndexes()));
+  await getDb();
 });
 
 beforeEach(async () => {
-  // Fresh data per test. Raw driver deletes bypass the ledger's append-only guard (tests only).
-  const db = mongoose.connection.db!;
-  for (const c of await db.collections()) await c.deleteMany({});
+  // Fresh data per test. TRUNCATE is not stopped by the ledger's append-only trigger (tests only).
+  const db = await getDb();
+  await db.execute(sql.raw(`truncate table ${TABLES} restart identity cascade`));
 });
 
 afterAll(async () => {

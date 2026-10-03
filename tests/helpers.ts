@@ -1,4 +1,7 @@
-import { Tenant, Location, User } from "@/server/models/core";
+import { count, type SQL } from "drizzle-orm";
+import type { PgTable } from "drizzle-orm/pg-core";
+import { getDb } from "@/server/db";
+import { tenants, locations, users } from "@/server/db/schema";
 import type { Ctx, TenantCtx } from "@/server/context";
 import type { Role } from "@/lib/roles";
 
@@ -17,41 +20,59 @@ let n = 0;
 
 async function user(tenantId: string, role: Role, locationIds: string[] = []): Promise<TenantCtx> {
   n++;
-  const u = await User.create({ tenantId, email: `u${n}-${Date.now()}@t.test`, name: `User ${n}`, role, locationIds, passwordHash: "x" });
-  return { userId: String(u._id), role, tenantId, locationIds, tenantStatus: "ACTIVE", name: u.name, email: u.email };
+  const db = await getDb();
+  const [u] = await db
+    .insert(users)
+    .values({ tenantId, email: `u${n}-${Date.now()}@t.test`, name: `User ${n}`, role, locationIds, passwordHash: "x" })
+    .returning();
+  return { userId: u.id, role, tenantId, locationIds, tenantStatus: "ACTIVE", name: u.name, email: u.email };
 }
 
 /** A shop with Store Room, Store A, Store B and one user per role. */
 export async function makeShop(name = "Shop"): Promise<TestShop> {
   n++;
-  const t = await Tenant.create({ name, slug: `${name.toLowerCase().replace(/\W/g, "-")}-${n}-${Date.now()}` });
-  const tenantId = String(t._id);
-  const [sr, a, b] = await Location.create(
-    [
-      { tenantId, name: "Store Room", type: "STORE_ROOM" },
-      { tenantId, name: "Store A", type: "STORE" },
-      { tenantId, name: "Store B", type: "STORE" },
-    ],
-    { ordered: true },
-  );
+  const db = await getDb();
+  const [t] = await db
+    .insert(tenants)
+    .values({ name, slug: `${name.toLowerCase().replace(/\W/g, "-")}-${n}-${Date.now()}` })
+    .returning({ id: tenants.id });
+  const tenantId = t.id;
+  const loc = async (locName: string, type: "STORE_ROOM" | "STORE") => {
+    const [l] = await db.insert(locations).values({ tenantId, name: locName, type }).returning({ id: locations.id });
+    return l.id;
+  };
+  const storeRoomId = await loc("Store Room", "STORE_ROOM");
+  const storeAId = await loc("Store A", "STORE");
+  const storeBId = await loc("Store B", "STORE");
   return {
     tenantId,
-    storeRoomId: String(sr._id),
-    storeAId: String(a._id),
-    storeBId: String(b._id),
+    storeRoomId,
+    storeAId,
+    storeBId,
     owner: await user(tenantId, "OWNER"),
     manager: await user(tenantId, "STOREROOM_MANAGER"),
-    staffA: await user(tenantId, "STORE_STAFF", [String(a._id)]),
-    staffB: await user(tenantId, "STORE_STAFF", [String(b._id)]),
+    staffA: await user(tenantId, "STORE_STAFF", [storeAId]),
+    staffB: await user(tenantId, "STORE_STAFF", [storeBId]),
   };
 }
 
 export async function platformAdmin(): Promise<Ctx> {
-  const u = await User.create({ tenantId: null, email: `admin${Date.now()}@t.test`, name: "Admin", role: "PLATFORM_ADMIN", passwordHash: "x" });
-  return { userId: String(u._id), role: "PLATFORM_ADMIN", tenantId: null, locationIds: [], tenantStatus: null, name: "Admin", email: u.email };
+  const db = await getDb();
+  const [u] = await db
+    .insert(users)
+    .values({ tenantId: null, email: `admin${Date.now()}-${++n}@t.test`, name: "Admin", role: "PLATFORM_ADMIN", passwordHash: "x" })
+    .returning();
+  return { userId: u.id, role: "PLATFORM_ADMIN", tenantId: null, locationIds: [], tenantStatus: null, name: "Admin", email: u.email };
 }
 
 export const suspended = (c: TenantCtx): TenantCtx => ({ ...c, tenantStatus: "SUSPENDED" });
+
+/** Number of rows in a table that match (direct database check, tests only). */
+export async function rowCount(table: PgTable, where?: SQL): Promise<number> {
+  const db = await getDb();
+  const [r] = await db.select({ n: count() }).from(table).where(where);
+  return r.n;
+}
 
 /** Expect a promise to reject with an AppError code. */
 export async function expectCode(p: Promise<unknown>, code: string) {
@@ -63,4 +84,17 @@ export async function expectCode(p: Promise<unknown>, code: string) {
     return;
   }
   throw new Error(`Expected error ${code} but the call succeeded`);
+}
+
+/** Expect a database statement to fail with a message matching `pattern` (looks through the ORM's wrapped error). */
+export async function expectDbError(p: PromiseLike<unknown>, pattern: RegExp) {
+  try {
+    await p;
+  } catch (e) {
+    for (let cur: unknown = e; cur; cur = (cur as { cause?: unknown }).cause) {
+      if (pattern.test(String((cur as Error).message ?? cur))) return;
+    }
+    throw new Error(`Expected a database error matching ${pattern} but got: ${(e as Error).message}`);
+  }
+  throw new Error(`Expected a database error matching ${pattern} but the statement succeeded`);
 }

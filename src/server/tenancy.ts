@@ -1,5 +1,4 @@
 import "server-only";
-import type { Types } from "mongoose";
 
 /*
  * The ONE place that decides which tenant a request belongs to.
@@ -7,6 +6,6 @@ import type { Types } from "mongoose";
  * Later: per-shop subdomains (shop.example.com) can be checked here by passing the
  * request host and rejecting a mismatch, without touching the data layer.
  */
-export function resolveTenantId(user: { tenantId: Types.ObjectId | null }, _host?: string | null): string | null {
-  return user.tenantId ? String(user.tenantId) : null;
+export function resolveTenantId(user: { tenantId: string | null }, _host?: string | null): string | null {
+  return user.tenantId ?? null;
 }

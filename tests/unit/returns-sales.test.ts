@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { makeShop, expectCode, suspended, type TestShop } from "../helpers";
+import { eq } from "drizzle-orm";
+import { makeShop, expectCode, suspended, rowCount, type TestShop } from "../helpers";
 import { createEntries, approveEntry, rejectEntry, listEntries } from "@/server/stock/returns";
 import { applySale, recordSale } from "@/server/stock/sales";
 import { rotateApiKey, getApiKeyInfo, ctxFromApiKey, revokeApiKey } from "@/server/data/apikeys";
@@ -8,7 +9,8 @@ import { receiveStock } from "@/server/stock/receipts";
 import { getLevels, listMovements } from "@/server/stock/read";
 import { createProduct } from "@/server/data/products";
 import { saveSupplier } from "@/server/data/suppliers";
-import { ApiKey, Tenant } from "@/server/models/core";
+import { getDb } from "@/server/db";
+import { apiKeys, tenants } from "@/server/db/schema";
 import { POST as salesPOST } from "@/app/api/v1/sales/route";
 
 /** Store Room 20 and Store A 10 of p and q. */
@@ -150,7 +152,7 @@ describe("POST /api/v1/sales", () => {
 
     await expectCode(rotateApiKey(s.manager), "FORBIDDEN");
     const { key } = await rotateApiKey(s.owner);
-    expect(await ApiKey.countDocuments({ keyHash: key })).toBe(0); // never stored in plain text
+    expect(await rowCount(apiKeys, eq(apiKeys.keyHash, key))).toBe(0); // never stored in plain text
     expect((await getApiKeyInfo(s.owner))?.prefix).toBe(key.slice(0, 12));
 
     const r1 = await call(key, body);
@@ -180,7 +182,7 @@ describe("POST /api/v1/sales", () => {
     const s = await makeShop();
     await stocked(s);
     const { key } = await rotateApiKey(s.owner);
-    await Tenant.updateOne({ _id: s.tenantId }, { $set: { status: "SUSPENDED" } });
+    await (await getDb()).update(tenants).set({ status: "SUSPENDED" }).where(eq(tenants.id, s.tenantId));
     const r = await call(key, { locationId: s.storeAId, externalRef: "S", items: [{ barcode: "P-001", quantity: 1 }] });
     expect(r.status).toBe(423);
   });

@@ -1,7 +1,10 @@
 import "server-only";
 import { z } from "zod";
-import { Location, type LocationDoc } from "../models/core";
-import { guard, tf } from "./guard";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { getDb } from "../db";
+import { locations } from "../db/schema";
+import type { LocationType } from "../db/types";
+import { guard, tf, assertId } from "./guard";
 import { runMutation } from "../mutation";
 import { AppError, isDuplicateKey } from "../errors";
 import type { Ctx } from "../context";
@@ -9,22 +12,31 @@ import type { Ctx } from "../context";
 export interface LocationView {
   id: string;
   name: string;
-  type: LocationDoc["type"];
+  type: LocationType;
   active: boolean;
 }
-const view = (l: LocationDoc): LocationView => ({ id: String(l._id), name: l.name, type: l.type, active: l.active });
+const view = (l: typeof locations.$inferSelect): LocationView => ({ id: l.id, name: l.name, type: l.type, active: l.active });
 
 /** STORE_STAFF only see their own store; everyone else sees all locations of the shop. */
 export async function listLocations(ctx: Ctx | null): Promise<LocationView[]> {
   const c = await guard(ctx, ["OWNER", "STOREROOM_MANAGER", "STORE_STAFF"]);
-  const filter = c.role === "STORE_STAFF" ? { ...tf(c), _id: { $in: c.locationIds } } : tf(c);
-  const rows = await Location.find(filter).sort({ type: -1, name: 1 }).lean();
+  if (c.role === "STORE_STAFF" && !c.locationIds.length) return [];
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(locations)
+    .where(and(eq(locations.tenantId, c.tenantId), c.role === "STORE_STAFF" ? inArray(locations.id, c.locationIds) : undefined))
+    .orderBy(desc(locations.type), asc(locations.name)); // STORE_ROOM first
   return rows.map(view);
 }
 
 export async function getStoreRoom(ctx: Ctx | null): Promise<LocationView> {
   const c = await guard(ctx, ["OWNER", "STOREROOM_MANAGER", "STORE_STAFF"]);
-  const l = await Location.findOne({ ...tf(c), type: "STORE_ROOM" }).lean();
+  const db = await getDb();
+  const [l] = await db
+    .select()
+    .from(locations)
+    .where(and(eq(locations.tenantId, c.tenantId), eq(locations.type, "STORE_ROOM")));
   if (!l) throw new AppError("NOT_FOUND", "Store Room not found.");
   return view(l);
 }
@@ -34,28 +46,36 @@ const nameSchema = z.object({ name: z.string().trim().min(2, "Enter a name").max
 export async function addStore(ctx: Ctx | null, input: unknown, idempotencyKey?: string) {
   const c = await guard(ctx, ["OWNER"]);
   const { name } = nameSchema.parse(input);
-  return runMutation(c, { action: "location.create", entity: "location", idempotencyKey }, async (session) => {
-    try {
-      const [l] = await Location.create([{ ...tf(c), name, type: "STORE" }], { session });
-      return { result: view(l), entityId: String(l._id), audit: { name } };
-    } catch (e) {
-      if (isDuplicateKey(e)) throw new AppError("CONFLICT", "A location with this name already exists.");
-      throw e;
-    }
-  });
+  try {
+    return await runMutation(c, { action: "location.create", entity: "location", idempotencyKey }, async (tx) => {
+      const [l] = await tx
+        .insert(locations)
+        .values({ ...tf(c), name, type: "STORE" })
+        .returning();
+      return { result: view(l), entityId: l.id, audit: { name } };
+    });
+  } catch (e) {
+    if (isDuplicateKey(e)) throw new AppError("CONFLICT", "A location with this name already exists.");
+    throw e;
+  }
 }
 
 export async function renameLocation(ctx: Ctx | null, id: string, input: unknown, idempotencyKey?: string) {
   const c = await guard(ctx, ["OWNER"]);
+  assertId(id, "Location not found.");
   const { name } = nameSchema.parse(input);
-  return runMutation(c, { action: "location.rename", entity: "location", idempotencyKey }, async (session) => {
-    try {
-      const l = await Location.findOneAndUpdate({ ...tf(c), _id: id }, { $set: { name } }, { session, returnDocument: "after" }).lean();
+  try {
+    return await runMutation(c, { action: "location.rename", entity: "location", idempotencyKey }, async (tx) => {
+      const [l] = await tx
+        .update(locations)
+        .set({ name })
+        .where(and(eq(locations.tenantId, c.tenantId), eq(locations.id, id)))
+        .returning();
       if (!l) throw new AppError("NOT_FOUND", "Location not found.");
       return { result: view(l), entityId: id, audit: { name } };
-    } catch (e) {
-      if (isDuplicateKey(e)) throw new AppError("CONFLICT", "A location with this name already exists.");
-      throw e;
-    }
-  });
+    });
+  } catch (e) {
+    if (isDuplicateKey(e)) throw new AppError("CONFLICT", "A location with this name already exists.");
+    throw e;
+  }
 }

@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SESSION_SECRET: ci-secret-ci-secret-ci-secret-ci-secret-1234
-      MONGODB_URI: mongodb://127.0.0.1:27017/unused
+      DATABASE_URL: pglite://memory
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -38,7 +38,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium webkit
-      # Playwright starts an in-memory replica set, seeds it, builds and starts the app (see playwright.config.ts).
+      # Playwright starts an embedded Postgres database, seeds it, builds and starts the app (see playwright.config.ts).
       - run: pnpm e2e
       - uses: actions/upload-artifact@v4
         if: failure()

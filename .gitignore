@@ -45,3 +45,5 @@ next-env.d.ts
 /test-results
 /coverage
 scripts/_*
+# embedded Postgres data (local development without Supabase)
+/.pglite*

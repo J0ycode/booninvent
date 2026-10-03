@@ -9,7 +9,7 @@ import { getCtx } from "@/server/context";
 import { listRequests } from "@/server/data/restock";
 import { listLocations } from "@/server/data/locations";
 import { dateTime, qtyFmt } from "@/lib/format";
-import type { RestockStatus } from "@/server/models/business";
+import type { RestockStatus } from "@/server/db/types";
 
 export const metadata: Metadata = { title: "Restock Requests" };
 

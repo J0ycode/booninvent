@@ -15,7 +15,7 @@ import { listSuppliers } from "@/server/data/suppliers";
 import { getStoreRoom } from "@/server/data/locations";
 import { getLevels } from "@/server/stock/read";
 import { money, qtyFmt } from "@/lib/format";
-import type { Category } from "@/server/models/business";
+import type { Category } from "@/server/db/types";
 
 export const metadata: Metadata = { title: "Products" };
 

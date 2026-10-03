@@ -1,6 +1,8 @@
 import "server-only";
 import { z } from "zod";
-import { Tenant } from "../models/core";
+import { eq } from "drizzle-orm";
+import { getDb } from "../db";
+import { tenants } from "../db/schema";
 import { guard } from "./guard";
 import { runMutation } from "../mutation";
 import { AppError } from "../errors";
@@ -17,9 +19,10 @@ export interface TenantView {
 
 export async function getMyTenant(ctx: Ctx | null): Promise<TenantView> {
   const c = await guard(ctx, ["OWNER", "STOREROOM_MANAGER", "STORE_STAFF"]);
-  const t = await Tenant.findById(c.tenantId).lean();
+  const db = await getDb();
+  const [t] = await db.select().from(tenants).where(eq(tenants.id, c.tenantId));
   if (!t) throw new AppError("NOT_FOUND", "Shop not found.");
-  return { id: String(t._id), name: t.name, slug: t.slug, status: t.status, company: t.company ?? {} };
+  return { id: t.id, name: t.name, slug: t.slug, status: t.status, company: t.company ?? {} };
 }
 
 export const companySchema = z.object({
@@ -33,12 +36,11 @@ export const companySchema = z.object({
 export async function updateCompany(ctx: Ctx | null, input: unknown, idempotencyKey?: string) {
   const c = await guard(ctx, ["OWNER"]);
   const d = companySchema.parse(input);
-  return runMutation(c, { action: "tenant.update_company", entity: "tenant", idempotencyKey }, async (session) => {
-    await Tenant.updateOne(
-      { _id: c.tenantId },
-      { $set: { name: d.name, company: { address: d.address, phone: d.phone, email: d.email, gstin: d.gstin } } },
-      { session },
-    );
+  return runMutation(c, { action: "tenant.update_company", entity: "tenant", idempotencyKey }, async (tx) => {
+    await tx
+      .update(tenants)
+      .set({ name: d.name, company: { address: d.address, phone: d.phone, email: d.email, gstin: d.gstin } })
+      .where(eq(tenants.id, c.tenantId));
     return { result: null, entityId: c.tenantId, audit: d };
   });
 }

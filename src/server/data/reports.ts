@@ -5,7 +5,9 @@ import { listLocations } from "./locations";
 import { listProducts, getProductsByIds } from "./products";
 import { listSupplierBills } from "./bills";
 import { listSuppliers } from "./suppliers";
-import { User } from "../models/core";
+import { eq } from "drizzle-orm";
+import { getDb } from "../db";
+import { users } from "../db/schema";
 import { getLevels, listMovements, stockAtLocation } from "../stock/read";
 import { listDispatches } from "../stock/dispatches";
 import { listEntries, TYPE_LABEL } from "../stock/returns";
@@ -194,14 +196,13 @@ export async function buildReport(ctx: Ctx | null, input: unknown): Promise<Repo
     }
     case "movements": {
       const list = await listMovements(c, { locationId: location, from, to, pageSize: MAX_ROWS });
-      const [products, users] = await Promise.all([
-        getProductsByIds(
-          c,
-          list.rows.map((m) => m.productId),
-        ),
-        User.find({ tenantId: c.tenantId }, { name: 1 }).lean(),
-      ]);
-      const userName = new Map(users.map((u) => [String(u._id), u.name]));
+      const products = await getProductsByIds(
+        c,
+        list.rows.map((m) => m.productId),
+      );
+      const db = await getDb();
+      const people = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.tenantId, c.tenantId));
+      const userName = new Map(people.map((u) => [u.id, u.name]));
       return {
         type: q.type,
         title,

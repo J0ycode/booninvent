@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { LabelPrintLog } from "../models/business";
+import { labelPrintLogs } from "../db/schema";
 import { guard, tf } from "./guard";
 import { runMutation } from "../mutation";
 import { AppError } from "../errors";
@@ -31,9 +31,12 @@ export async function prepareLabelJob(ctx: Ctx | null, input: unknown): Promise<
     job.items.map((i) => i.productId),
   );
   if (products.size !== new Set(job.items.map((i) => i.productId)).size) throw new AppError("VALIDATION", "One of the products was not found.");
-  await runMutation(c, { action: "labels.print", entity: "labelPrintLog" }, async (session) => {
-    const [log] = await LabelPrintLog.create([{ ...tf(c), userId: c.userId, preset: job.preset, startPosition: job.startPosition, items: job.items, totalLabels: total }], { session });
-    return { result: null, entityId: String(log._id), audit: { preset: job.preset, totalLabels: total } };
+  await runMutation(c, { action: "labels.print", entity: "labelPrintLog" }, async (tx) => {
+    const [log] = await tx
+      .insert(labelPrintLogs)
+      .values({ ...tf(c), userId: c.userId, preset: job.preset, startPosition: job.startPosition, items: job.items, totalLabels: total })
+      .returning({ id: labelPrintLogs.id });
+    return { result: null, entityId: log.id, audit: { preset: job.preset, totalLabels: total } };
   });
   return { job, products };
 }

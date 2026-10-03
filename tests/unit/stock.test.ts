@@ -1,13 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { makeShop, expectCode, suspended, type TestShop } from "../helpers";
-import { withTransaction } from "@/server/db";
+import { and, eq } from "drizzle-orm";
+import { makeShop, expectCode, expectDbError, rowCount, suspended, type TestShop } from "../helpers";
+import { getDb, withTransaction } from "@/server/db";
 import { applyMoves } from "@/server/stock/core";
 import { receiveStock, listReceipts } from "@/server/stock/receipts";
 import { getLevels, listMovements } from "@/server/stock/read";
 import { createProduct, getProduct } from "@/server/data/products";
 import { saveSupplier } from "@/server/data/suppliers";
-import { StockLevel, StockMovement } from "@/server/models/stock";
-import { AuditLog } from "@/server/models/core";
+import { stockLevels, stockMovements } from "@/server/db/stock-schema";
+import { auditLogs } from "@/server/db/schema";
 
 async function setup(s: TestShop) {
   const sup = await saveSupplier(s.manager, null, { name: "Little Threads" });
@@ -38,7 +39,7 @@ describe("receiveStock", () => {
     const mv = await listMovements(s.owner, { productId: p.id });
     expect(mv.rows).toHaveLength(1);
     expect(mv.rows[0]).toMatchObject({ type: "RECEIPT", quantityDelta: 12, balanceAfter: 12, refType: "receipt", refId: r.id });
-    expect(await AuditLog.countDocuments({ tenantId: s.tenantId, action: "stock.receive" })).toBe(1);
+    expect(await rowCount(auditLogs, and(eq(auditLogs.tenantId, s.tenantId), eq(auditLogs.action, "stock.receive")))).toBe(1);
     expect((await getProduct(s.owner, p.id)).costPrice).toBe(25000); // latest cost saved
   });
 
@@ -67,7 +68,7 @@ describe("receiveStock", () => {
     const sb = await setup(b);
     await expectCode(receiveStock(a.manager, { supplierId: sb.sup.id, invoiceNumber: "I", lines: [{ productId: sa.p.id, quantity: 1 }] }), "VALIDATION");
     await expectCode(receiveStock(a.manager, { supplierId: sa.sup.id, invoiceNumber: "I", lines: [{ productId: sb.p.id, quantity: 1 }] }), "VALIDATION");
-    expect(await StockLevel.countDocuments({ tenantId: b.tenantId })).toBe(0);
+    expect(await rowCount(stockLevels, eq(stockLevels.tenantId, b.tenantId))).toBe(0);
   });
 
   it("is idempotent: the same key records the delivery once", async () => {
@@ -86,7 +87,7 @@ describe("stock rules", () => {
     const s = await makeShop();
     const { sup, p, q } = await setup(s);
     await receiveStock(s.manager, { supplierId: sup.id, invoiceNumber: "I", lines: [{ productId: p.id, quantity: 3 }, { productId: q.id, quantity: 3 }] });
-    const before = await StockMovement.countDocuments({ tenantId: s.tenantId });
+    const before = await rowCount(stockMovements, eq(stockMovements.tenantId, s.tenantId));
     let message = "";
     try {
       await withTransaction((session) =>
@@ -108,7 +109,7 @@ describe("stock rules", () => {
     // Whole transaction rolled back: no partial decrement, no ledger rows.
     expect(await qtyAt(s, q.id, s.storeRoomId)).toBe(3);
     expect(await qtyAt(s, p.id, s.storeRoomId)).toBe(3);
-    expect(await StockMovement.countDocuments({ tenantId: s.tenantId })).toBe(before);
+    expect(await rowCount(stockMovements, eq(stockMovements.tenantId, s.tenantId))).toBe(before);
   });
 
   it("concurrent decrements cannot oversell", async () => {
@@ -128,9 +129,14 @@ describe("stock rules", () => {
     await receiveStock(s.manager, { supplierId: sup.id, invoiceNumber: "1", lines: [{ productId: p.id, quantity: 7 }, { productId: q.id, quantity: 2 }] });
     await receiveStock(s.manager, { supplierId: sup.id, invoiceNumber: "2", lines: [{ productId: p.id, quantity: 4 }] });
     await withTransaction((session) => applyMoves(s.manager, session, [{ productId: p.id, locationId: s.storeRoomId, delta: -6, type: "DAMAGE" }], { refType: "t", refId: "x" }));
-    const levels = await StockLevel.find({ tenantId: s.tenantId }).lean();
+    const db = await getDb();
+    const levels = await db.select().from(stockLevels).where(eq(stockLevels.tenantId, s.tenantId));
+    expect(levels.length).toBeGreaterThan(0);
     for (const l of levels) {
-      const moves = await StockMovement.find({ tenantId: s.tenantId, productId: l.productId, locationId: l.locationId }).lean();
+      const moves = await db
+        .select()
+        .from(stockMovements)
+        .where(and(eq(stockMovements.tenantId, s.tenantId), eq(stockMovements.productId, l.productId), eq(stockMovements.locationId, l.locationId)));
       expect(moves.reduce((sum, m) => sum + m.quantityDelta, 0)).toBe(l.quantity);
     }
   });
@@ -139,9 +145,13 @@ describe("stock rules", () => {
     const s = await makeShop();
     const { sup, p } = await setup(s);
     await receiveStock(s.manager, { supplierId: sup.id, invoiceNumber: "I", lines: [{ productId: p.id, quantity: 1 }] });
-    await expect(StockMovement.updateOne({ tenantId: s.tenantId }, { $set: { quantityDelta: 100 } })).rejects.toThrow(/append-only/);
-    await expect(StockMovement.deleteMany({ tenantId: s.tenantId })).rejects.toThrow(/append-only/);
-    await expect(StockMovement.findOneAndUpdate({ tenantId: s.tenantId }, { $set: { note: "x" } })).rejects.toThrow(/append-only/);
+    // Enforced by a database trigger, so it holds for any client, not only this app.
+    const db = await getDb();
+    const mine = eq(stockMovements.tenantId, s.tenantId);
+    await expectDbError(db.update(stockMovements).set({ quantityDelta: 100 }).where(mine), /append-only/);
+    await expectDbError(db.delete(stockMovements).where(mine), /append-only/);
+    await expectDbError(db.update(stockMovements).set({ note: "x" }).where(mine), /append-only/);
+    expect(await rowCount(stockMovements, mine)).toBe(1);
   });
 
   it("rejects zero/fractional deltas and foreign locations", async () => {

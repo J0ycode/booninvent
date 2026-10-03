@@ -1,6 +1,7 @@
 import "server-only";
-import { connectDb } from "../db";
+import { getDb } from "../db";
 import { AppError } from "../errors";
+import { objectId } from "@/lib/validation";
 import type { Ctx, TenantCtx } from "../context";
 import type { Role } from "@/lib/roles";
 
@@ -9,14 +10,14 @@ export async function guard(ctx: Ctx | null, roles: readonly Role[]): Promise<Te
   if (!ctx) throw new AppError("UNAUTHENTICATED", "Please sign in again.");
   if (!roles.includes(ctx.role)) throw new AppError("FORBIDDEN", "You do not have access to this.");
   if (!ctx.tenantId) throw new AppError("FORBIDDEN", "You do not have access to this.");
-  await connectDb();
+  await getDb();
   return ctx as TenantCtx;
 }
 
 export async function guardPlatform(ctx: Ctx | null): Promise<Ctx> {
   if (!ctx) throw new AppError("UNAUTHENTICATED", "Please sign in again.");
   if (ctx.role !== "PLATFORM_ADMIN") throw new AppError("FORBIDDEN", "You do not have access to this.");
-  await connectDb();
+  await getDb();
   return ctx;
 }
 
@@ -34,5 +35,13 @@ export function staffLocationId(ctx: TenantCtx): string {
   return id;
 }
 
-/** Base filter for every tenant query. tenantId always comes from ctx, never from input. */
+/** Tenant columns for every insert. tenantId always comes from ctx, never from input. */
 export const tf = (ctx: TenantCtx) => ({ tenantId: ctx.tenantId });
+
+/** True for a well-formed record id. Postgres rejects anything else in a uuid column, so check ids from URLs first. */
+export const isId = (id: unknown): id is string => typeof id === "string" && objectId.safeParse(id).success;
+
+/** Throws NOT_FOUND for an id that cannot exist (e.g. a mistyped URL). */
+export function assertId(id: unknown, message = "Not found."): asserts id is string {
+  if (!isId(id)) throw new AppError("NOT_FOUND", message);
+}

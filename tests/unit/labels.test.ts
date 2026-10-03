@@ -3,7 +3,9 @@ import { PDFDocument } from "pdf-lib";
 import { makeShop, expectCode } from "../helpers";
 import { labelsPdf } from "@/server/pdf/labels";
 import { createProduct } from "@/server/data/products";
-import { LabelPrintLog } from "@/server/models/business";
+import { eq } from "drizzle-orm";
+import { getDb } from "@/server/db";
+import { labelPrintLogs } from "@/server/db/schema";
 import { LABEL_PRESETS, slotPosition, A4 } from "@/lib/label-presets";
 
 describe("label sheets", () => {
@@ -22,7 +24,7 @@ describe("label sheets", () => {
     const bytes = await labelsPdf(s.manager, { preset: 24, startPosition: 20, items: [{ productId: p.id, count: 10 }] });
     const doc = await PDFDocument.load(bytes);
     expect(doc.getPageCount()).toBe(2); // 5 slots left on sheet 1, 5 on sheet 2
-    const log = await LabelPrintLog.findOne({ tenantId: s.tenantId }).lean();
+    const [log] = await (await getDb()).select().from(labelPrintLogs).where(eq(labelPrintLogs.tenantId, s.tenantId));
     expect(log).toMatchObject({ preset: 24, startPosition: 20, totalLabels: 10 });
   });
 

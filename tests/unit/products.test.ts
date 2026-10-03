@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import { makeShop, expectCode, suspended } from "../helpers";
 import { createProduct, updateProduct, listProducts, getProduct, findByCode, importProducts, getProductsByIds } from "@/server/data/products";
 import { saveSupplier, listSuppliers } from "@/server/data/suppliers";
-import { ProductCost } from "@/server/models/business";
+import { eq } from "drizzle-orm";
+import { productCosts } from "@/server/db/schema";
+import { rowCount } from "../helpers";
 
 const romper = { name: "Cotton Romper 0-3M", category: "CLOTHING", sellingPrice: "499", costPrice: "250", reorderLevel: 5 };
 
@@ -56,7 +58,7 @@ describe("products", () => {
     await expectCode(getProduct(b.owner, pa.id), "NOT_FOUND");
     expect(await findByCode(b.owner, pa.barcode)).toBeNull();
     await expectCode(updateProduct(b.manager, pa.id, romper), "NOT_FOUND");
-    expect(await ProductCost.countDocuments({ tenantId: b.tenantId })).toBe(0);
+    expect(await rowCount(productCosts, eq(productCosts.tenantId, b.tenantId))).toBe(0);
   });
 
   it("rejects a supplier from another tenant", async () => {

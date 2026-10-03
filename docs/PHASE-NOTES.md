@@ -228,3 +228,25 @@ Lighthouse (Chrome DevTools → Lighthouse → Mobile) on /login, /store, /store
 - Isolation tests cover tenant, store, cost price and bills access.
 - Device pass screenshots were checked at 360/768/1280; `tests/e2e/pages.spec.ts` covers every main screen at all six sizes.
 - No payment integration exists anywhere in the code.
+
+---
+
+## Supabase migration (branch `supabase`)
+
+**What changed:** the database is now Postgres on Supabase instead of MongoDB. Nothing changes for users: same screens, same logins, same rules. Supabase is used as a database only; the app keeps its own login and tenant checks.
+
+- `src/server/db/` replaces `src/server/models/` and `src/server/db.ts` (Drizzle tables, connection, transactions).
+- `drizzle/0000_init.sql` creates the 21 tables; `drizzle/0001_guards.sql` adds the append-only ledger trigger and switches on row-level security.
+- Every data and stock function was rewritten for SQL; their inputs, outputs and error codes are unchanged, so pages, actions and routes were not touched (except four type imports).
+- Tests run on an embedded Postgres (PGlite); `mongoose` and `mongodb-memory-server` were removed.
+
+**Checked by Claude:** typecheck, lint, production build, a full demo seed on embedded Postgres, and every portal page loaded as each role (data present, other shop's data absent, store staff refused on bills and reports, CSV exports, bad ids give 404).
+
+**Not checked yet:** the unit and e2e suites (yours to run), and the real Supabase connection.
+
+### To do (you)
+1. In `.env.local`, set `DATABASE_URL` to the Supabase **Transaction pooler** string and `DIRECT_URL` to the **Session pooler** string (Dashboard -> Connect). Both start with `postgresql://` and contain the database password.
+2. `pnpm db:migrate`, then `pnpm seed`, then `pnpm dev` and sign in as each demo user.
+3. `pnpm test` and `pnpm e2e` (no database setup needed for either).
+4. In Supabase -> Table Editor, confirm every table shows "RLS enabled".
+5. Go-live: add `DATABASE_URL` in Vercel (Production and Preview), merge `supabase` into `main`, and create the platform admin with `pnpm create-platform-admin`. `MONGODB_URI` can then be removed from Vercel and the Atlas cluster deleted.

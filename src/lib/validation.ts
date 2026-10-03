@@ -3,7 +3,8 @@ import { z } from "zod";
 /** Shared Zod pieces used by both client forms and the server. */
 export const emailSchema = z.string().trim().toLowerCase().email("Enter a valid email address");
 export const passwordSchema = z.string().min(8, "Use at least 8 characters").max(128);
-export const objectId = z.string().regex(/^[a-f0-9]{24}$/i, "Invalid id");
+/** A record id (Postgres uuid). The name is kept from the first version of the app. */
+export const objectId = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "Invalid id");
 export const qty = z.coerce.number().int("Use whole pieces").min(1, "Enter at least 1");
 export const qtyZeroOk = z.coerce.number().int("Use whole pieces").min(0, "Cannot be negative");
 

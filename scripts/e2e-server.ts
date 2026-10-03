@@ -1,17 +1,20 @@
 /**
- * Starts everything Playwright needs: an in-memory MongoDB replica set, demo seed data and the app.
+ * Starts everything Playwright needs: an embedded Postgres database (PGlite, in a temp folder), demo seed data and the app.
  * Used by playwright.config.ts (webServer). Not for production.
  */
-import { MongoMemoryReplSet } from "mongodb-memory-server";
 import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 const PORT = process.env.E2E_PORT ?? "3100";
 
 async function main() {
-  const rs = await MongoMemoryReplSet.create({ replSet: { count: 1, storageEngine: "wiredTiger" } });
+  const dir = mkdtempSync(path.join(tmpdir(), "boonbaby-e2e-"));
   const env = {
     ...process.env,
-    MONGODB_URI: rs.getUri("boonbaby_e2e"),
+    // The seed and the app open this folder one after the other (an embedded database allows one process at a time).
+    DATABASE_URL: `pglite://${path.join(dir, "db").replace(/\\/g, "/")}`,
     SESSION_SECRET: process.env.SESSION_SECRET ?? "e2e-secret-e2e-secret-e2e-secret-1234",
     APP_URL: `http://localhost:${PORT}`,
   };
@@ -23,9 +26,9 @@ async function main() {
     if (build.status !== 0) throw new Error("Build failed");
   }
   const app = spawn("pnpm", cmd, { env, stdio: "inherit", shell: true });
-  const stop = async () => {
+  const stop = () => {
     app.kill();
-    await rs.stop();
+    rmSync(dir, { recursive: true, force: true });
     process.exit(0);
   };
   process.on("SIGINT", stop);

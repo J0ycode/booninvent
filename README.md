@@ -15,11 +15,12 @@ Works on phone, tablet and desktop, and installs as an app (PWA).
 
 ## 1. Run it locally
 
-**Needs:** Node.js 20.9+ (22 or 24 recommended), pnpm 12 (`corepack enable`), and a MongoDB **replica set** (transactions are used for every stock change). Docker is not needed.
+**Needs:** Node.js 20.9+ (22 or 24 recommended), pnpm 12 (`corepack enable`), and a Postgres database: a free **Supabase** project, or nothing at all for a quick local run (an embedded Postgres is built in). Docker is not needed.
 
 ```bash
 pnpm install
-cp .env.example .env.local      # then fill in MONGODB_URI and SESSION_SECRET
+cp .env.example .env.local      # then fill in DATABASE_URL and SESSION_SECRET
+pnpm db:migrate                 # create the tables (Supabase only; the embedded database does this itself)
 pnpm seed                       # demo shops + a login for every role
 pnpm dev                        # http://localhost:3000
 ```
@@ -38,15 +39,14 @@ Password for all of them: **`Demo@12345`**
 
 `pnpm seed` deletes and recreates only these two demo shops; other shops are not touched.
 
-### MongoDB options
-- **MongoDB Atlas (recommended):** a free M0 cluster is a replica set. Use its connection string in `MONGODB_URI`, with a database name in the path, e.g. `…mongodb.net/boonbaby?retryWrites=true&w=majority`.
-- **Local, without Docker:** install MongoDB Community, then start a single-node replica set:
-  ```bash
-  mongod --replSet rs0 --dbpath ./.mongo-data --port 27017      # create the folder first
-  mongosh --eval 'rs.initiate({_id:"rs0",members:[{_id:0,host:"127.0.0.1:27017"}]})'   # once
-  ```
-  `MONGODB_URI=mongodb://127.0.0.1:27017/boonbaby?replicaSet=rs0`
-- **Tests** need neither: they start an in-memory replica set (mongodb-memory-server).
+### Database options
+- **Supabase (recommended):** create a project, then open **Connect** in the dashboard and copy the **Transaction pooler** connection string (port 6543) into `DATABASE_URL`, with your database password filled in. It starts with `postgresql://`. The `https://<ref>.supabase.co` address and the API keys are not used: the app talks to Postgres directly and keeps its own login.
+  - `pnpm db:migrate` creates or updates the tables. For that command, set `DIRECT_URL` to the **Session pooler** string (port 5432).
+  - Row-level security is switched on for every table with no policies, so Supabase's public REST API cannot read or write anything. The app connects as the database owner and is not affected.
+- **Local, with nothing installed:** `DATABASE_URL=pglite://./.pglite` runs an embedded Postgres (PGlite) saved in the `.pglite` folder and applies the migrations by itself. One process at a time: stop `pnpm dev` before running `pnpm seed`.
+- **Tests** use the embedded database in memory (`pglite://memory`); nothing to set up.
+
+Changing the schema: edit `src/server/db/schema.ts` (or `stock-schema.ts`), run `pnpm db:generate` to write a new SQL file into `drizzle/`, review it, then `pnpm db:migrate`.
 
 ### Create the platform admin
 The PLATFORM_ADMIN cannot be created in the UI:
@@ -67,6 +67,8 @@ Running it again for the same email resets the password.
 | `pnpm typecheck` | Route typegen + `tsc --noEmit` |
 | `pnpm test` | Vitest: stock rules, tenant/store isolation, cost and bill visibility, API auth |
 | `pnpm e2e` | Playwright at 360, 390 (iOS), 768, 1024, 1280 and 1920 widths. Run `pnpm exec playwright install chromium webkit` first; it starts its own database and app |
+| `pnpm db:migrate` | Apply the SQL migrations in `drizzle/` to the database in `DIRECT_URL` / `DATABASE_URL` |
+| `pnpm db:generate` | Write a new migration after changing the schema files |
 | `pnpm seed` | Recreate the demo shops |
 | `pnpm create-platform-admin` | Create or reset the platform admin |
 | `pnpm format` | Prettier |
@@ -79,7 +81,9 @@ Husky runs `lint` and `typecheck` on every commit. GitHub Actions (`.github/work
 
 | Variable | Required | Description |
 |---|---|---|
-| `MONGODB_URI` | yes | MongoDB replica-set connection string (Atlas or local `?replicaSet=rs0`) |
+| `DATABASE_URL` | yes | Postgres connection string. Supabase: the Transaction pooler string (port 6543). Local: `pglite://./.pglite` |
+| `DIRECT_URL` | for migrations | Supabase Session pooler string (port 5432), used only by `pnpm db:migrate`. Falls back to `DATABASE_URL` |
+| `DATABASE_POOL_MAX` | optional | Connections per server instance (default 5) |
 | `SESSION_SECRET` | yes | 32+ random characters used to sign session cookies. Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Changing it signs everyone out |
 | `APP_URL` | yes in production | Public URL, used in invite and password-reset links (e.g. `https://booninvent.vercel.app`) |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | for real emails | SMTP for invites and password resets. Without `SMTP_HOST`, emails are printed to the server log |
@@ -129,44 +133,44 @@ More detail: [`docs/SALES_API.md`](docs/SALES_API.md).
 
 ---
 
-## 5. Deploy (Vercel + MongoDB Atlas)
+## 5. Deploy (Vercel + Supabase)
 
-1. **Atlas**
-   - Create a cluster (M0 free tier is fine to start; M10+ for real shops, which adds automatic backups).
-   - Database Access: create a user with read/write on your database.
-   - Network Access: add `0.0.0.0/0` (Vercel has no fixed IPs), or use Atlas's Vercel integration.
-   - Copy the connection string and add the database name (`/boonbaby`).
+1. **Supabase**
+   - Create a project (the free tier is fine to start; Pro for real shops, which adds daily backups). Pick a region close to your shops, and keep the database password.
+   - Dashboard -> **Connect**: copy the **Transaction pooler** string (for `DATABASE_URL`) and the **Session pooler** string (for `DIRECT_URL`).
+   - From your machine, with both in `.env.local`: `pnpm db:migrate`.
 2. **Vercel**
    - Add New Project → import `github.com/J0ycode/booninvent`. The framework is detected as Next.js; keep the default build settings (pnpm is read from `packageManager`).
-   - Environment Variables (Production and Preview): `MONGODB_URI`, `SESSION_SECRET`, `APP_URL`, plus SMTP and `ERROR_WEBHOOK_URL` if used.
+   - Environment Variables (Production and Preview): `DATABASE_URL` (Transaction pooler string), `SESSION_SECRET`, `APP_URL`, plus SMTP and `ERROR_WEBHOOK_URL` if used.
    - Deploy. After the first deploy, set `APP_URL` to the final domain and redeploy.
 3. **First run**
-   - Create the platform admin from your machine against the production database: `MONGODB_URI=… pnpm create-platform-admin admin@yourdomain.com '…'`.
-   - Optional demo data: `pnpm seed` with the production `MONGODB_URI` (creates only the demo shops). Skip this for a real launch.
+   - Create the platform admin from your machine against the production database: `DATABASE_URL=… pnpm create-platform-admin admin@yourdomain.com '…'`.
+   - Optional demo data: `pnpm seed` with the production `DATABASE_URL` (creates only the demo shops). Skip this for a real launch.
    - Shops sign up at `/signup`.
 4. Every push to `main` deploys automatically. Pull requests get preview URLs.
 
 **Install note:** `pnpm-workspace.yaml` sets `minimumReleaseAgeExclude` for two transitive packages that were newer than pnpm's 1-day safety window at the time. Remove those lines once they are older.
 
 ### Backups
-- Atlas **M10+** clusters have continuous cloud backup with point-in-time restore. Turn it on (Cluster → Backup) and keep at least 7 days.
-- On **M0/M2/M5** there are no automatic backups. Take a daily dump from a trusted machine:
-  `mongodump --uri="$MONGODB_URI" --gzip --archive=boonbaby-$(date +%F).gz` and keep copies off-site.
-  Restore: `mongorestore --uri="$MONGODB_URI" --gzip --archive=boonbaby-YYYY-MM-DD.gz --drop`.
-- The `stockmovements` ledger is append-only: stock levels can always be checked against it (the sum of `quantityDelta` per product and location equals `stocklevels.quantity`).
+- Supabase **Pro** projects are backed up daily (7 days kept); point-in-time recovery is an add-on. See Database -> Backups.
+- On the **free** tier there are no downloadable backups. Take a daily dump from a trusted machine with the Session pooler string:
+  `pg_dump "$DIRECT_URL" --no-owner --format=custom --file=boonbaby-$(date +%F).dump` and keep copies off-site.
+  Restore into an empty database: `pg_restore --no-owner --dbname="$DIRECT_URL" boonbaby-YYYY-MM-DD.dump`.
+- The `stock_movements` ledger is append-only (a database trigger rejects updates and deletes): stock levels can always be checked against it (the sum of `quantity_delta` per product and location equals `stock_levels.quantity`).
+- Free Supabase projects pause after about a week without activity. Open the dashboard and press Restore to wake one up.
 
 ### Error logging and monitoring
 - Server errors are logged as one JSON line each (`src/instrumentation.ts`). See them in Vercel → Project → Logs (filter `level":"error`).
 - Set `ERROR_WEBHOOK_URL` to also receive each error in Slack/Discord or a log service.
 - Users see a friendly error page with **Try again**, and a code (digest) that matches the log line.
-- Every state change is recorded in the `auditlogs` collection (who, what, when).
+- Every state change is recorded in the `audit_logs` table (who, what, when).
 
 ---
 
 ## 6. How it is built
 
-Next.js 16 (App Router, `src/proxy.ts`), TypeScript strict, Tailwind v4 + shadcn/ui (Base UI), TanStack Table, React Hook Form + Zod, MongoDB + Mongoose 9, jose cookie sessions + bcrypt, Nodemailer, bwip-js (Code 128), pdf-lib (dispatch notes, label sheets), @zxing/browser (camera scanning).
+Next.js 16 (App Router, `src/proxy.ts`), TypeScript strict, Tailwind v4 + shadcn/ui (Base UI), TanStack Table, React Hook Form + Zod, Postgres (Supabase) + Drizzle ORM, jose cookie sessions + bcrypt, Nodemailer, bwip-js (Code 128), pdf-lib (dispatch notes, label sheets), @zxing/browser (camera scanning).
 
 - **Tenant safety:** pages and routes never touch the database directly; everything goes through `src/server/data/*` (tenant taken from the session, never from input), enforced by ESLint and covered by isolation tests.
-- **Stock correctness:** only `src/server/stock/*` changes quantities: MongoDB transactions, never-negative conditional updates, append-only ledger, audit log, idempotency keys.
+- **Stock correctness:** only `src/server/stock/*` changes quantities: Postgres transactions, never-negative conditional updates backed by a CHECK constraint, an append-only ledger enforced by a trigger, audit log, idempotency keys.
 - Rules and conventions: [`CLAUDE.md`](CLAUDE.md). Design decisions: [`docs/DECISIONS.md`](docs/DECISIONS.md). Per-phase notes and test checklists: [`docs/PHASE-NOTES.md`](docs/PHASE-NOTES.md).

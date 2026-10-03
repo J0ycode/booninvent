@@ -12,7 +12,7 @@ import { getCtx } from "@/server/context";
 import { listDispatches } from "@/server/stock/dispatches";
 import { listLocations } from "@/server/data/locations";
 import { dateTime, qtyFmt } from "@/lib/format";
-import type { DispatchStatus } from "@/server/models/business";
+import type { DispatchStatus } from "@/server/db/types";
 
 export const metadata: Metadata = { title: "Dispatch" };
 

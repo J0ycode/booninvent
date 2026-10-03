@@ -1,4 +1,6 @@
-import type { Types } from "mongoose";
+import { eq } from "drizzle-orm";
+import { getDb } from "@/server/db";
+import { users } from "@/server/db/schema";
 import type { TenantCtx } from "@/server/context";
 import { saveSupplier, listSuppliers } from "@/server/data/suppliers";
 import { importProducts, listProducts } from "@/server/data/products";
@@ -9,22 +11,22 @@ import { applySale } from "@/server/stock/sales";
 import { createEntries } from "@/server/stock/returns";
 import { saveSupplierBill, markSupplierBillPaid } from "@/server/data/bills";
 import { isoDay } from "@/lib/format";
-import { User } from "@/server/models/core";
 
 export interface SeedTenant {
-  tenant: { _id: Types.ObjectId };
-  storeRoom: { _id: Types.ObjectId };
-  stores: { _id: Types.ObjectId }[];
+  tenant: { id: string };
+  storeRoom: { id: string };
+  stores: { id: string }[];
 }
 
 export async function ctxFor(email: string): Promise<TenantCtx> {
-  const u = await User.findOne({ email }).lean();
+  const db = await getDb();
+  const [u] = await db.select().from(users).where(eq(users.email, email));
   if (!u || !u.tenantId) throw new Error(`Seed user ${email} missing`);
   return {
-    userId: String(u._id),
+    userId: u.id,
     role: u.role,
-    tenantId: String(u.tenantId),
-    locationIds: u.locationIds.map(String),
+    tenantId: u.tenantId,
+    locationIds: u.locationIds,
     tenantStatus: "ACTIVE",
     name: u.name,
     email: u.email,
@@ -99,8 +101,8 @@ export async function seedCatalogAndStock(_t: SeedTenant) {
   console.log("Seeded 2 receipts.");
 
   // Phase 4: dispatches to the stores.
-  const storeA = String(_t.stores[0]._id);
-  const storeB = String(_t.stores[1]._id);
+  const storeA = _t.stores[0].id;
+  const storeB = _t.stores[1].id;
   const staffA = await ctxFor("storea@demo.test");
   const staffB = await ctxFor("storeb@demo.test");
   const send = async (to: string, items: typeof clothing, n: number) =>
@@ -144,14 +146,15 @@ export async function seedCatalogAndStock(_t: SeedTenant) {
 }
 
 /** Platform bills issued by the PLATFORM_ADMIN (one overdue for the demo shop). */
-export async function seedPlatformBills(demoTenantId: Types.ObjectId, otherTenantId: Types.ObjectId) {
+export async function seedPlatformBills(demoTenantId: string, otherTenantId: string) {
   const { adminSavePlatformBill, adminMarkPlatformBillPaid } = await import("@/server/data/bills");
-  const u = await User.findOne({ email: "admin@demo.test" }).lean();
-  const admin = { userId: String(u!._id), role: "PLATFORM_ADMIN" as const, tenantId: null, locationIds: [], tenantStatus: null, name: u!.name, email: u!.email };
+  const db = await getDb();
+  const [u] = await db.select().from(users).where(eq(users.email, "admin@demo.test"));
+  const admin = { userId: u.id, role: "PLATFORM_ADMIN" as const, tenantId: null, locationIds: [], tenantStatus: null, name: u.name, email: u.email };
   const d = (n: number) => isoDay(new Date(Date.now() + n * 864e5));
-  const sept = await adminSavePlatformBill(admin, String(demoTenantId), null, { billNumber: "BB-2026-09", description: "Subscription, September 2026", amount: "999", issueDate: d(-33), dueDate: d(-18) });
+  const sept = await adminSavePlatformBill(admin, demoTenantId, null, { billNumber: "BB-2026-09", description: "Subscription, September 2026", amount: "999", issueDate: d(-33), dueDate: d(-18) });
   await adminMarkPlatformBillPaid(admin, sept.id, { note: "Paid by UPI" });
-  await adminSavePlatformBill(admin, String(demoTenantId), null, { billNumber: "BB-2026-10", description: "Subscription, October 2026", amount: "999", issueDate: d(-3), dueDate: d(-1) });
-  await adminSavePlatformBill(admin, String(otherTenantId), null, { billNumber: "BB-2026-10-O", description: "Subscription, October 2026", amount: "999", issueDate: d(-3), dueDate: d(12) });
+  await adminSavePlatformBill(admin, demoTenantId, null, { billNumber: "BB-2026-10", description: "Subscription, October 2026", amount: "999", issueDate: d(-3), dueDate: d(-1) });
+  await adminSavePlatformBill(admin, otherTenantId, null, { billNumber: "BB-2026-10-O", description: "Subscription, October 2026", amount: "999", issueDate: d(-3), dueDate: d(12) });
   console.log("Seeded 3 platform bills.");
 }

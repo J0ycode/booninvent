@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { signup, login, requestPasswordReset, resetPassword } from "@/server/data/auth";
 import { ctxFromToken } from "@/server/context";
-import { AuthToken, User, Location } from "@/server/models/core";
+import { eq } from "drizzle-orm";
+import { getDb } from "@/server/db";
+import { authTokens, users, locations } from "@/server/db/schema";
 import { sha256 } from "@/server/auth/password";
 import { updateUser } from "@/server/data/users";
 import { expectCode } from "../helpers";
@@ -14,7 +16,8 @@ describe("auth", () => {
     expect(s.role).toBe("OWNER");
     const ctx = await ctxFromToken(s.token);
     expect(ctx?.role).toBe("OWNER");
-    const locs = await Location.find({ tenantId: ctx!.tenantId }).lean();
+    const db = await getDb();
+    const locs = await db.select().from(locations).where(eq(locations.tenantId, ctx!.tenantId!));
     expect(locs.map((l) => l.type).sort()).toEqual(["STORE", "STORE_ROOM"]);
     const l = await login({ email: owner.email, password: owner.password }, "1.1.1.1");
     expect((await ctxFromToken(l.token))?.userId).toBe(ctx!.userId);
@@ -35,10 +38,11 @@ describe("auth", () => {
   it("password reset sets a new password and revokes old sessions", async () => {
     const s = await signup(owner);
     await requestPasswordReset({ email: owner.email });
-    const tok = await AuthToken.findOne({ type: "RESET" }).lean();
+    const db = await getDb();
+    const [tok] = await db.select().from(authTokens).where(eq(authTokens.type, "RESET"));
     expect(tok).toBeTruthy();
     // Only the hash is stored; swap in a known token to simulate clicking the emailed link.
-    await AuthToken.updateOne({ _id: tok!._id }, { $set: { tokenHash: sha256("known-token-123") } });
+    await db.update(authTokens).set({ tokenHash: sha256("known-token-123") }).where(eq(authTokens.id, tok.id));
     const r = await resetPassword({ token: "known-token-123", password: "newpass123" });
     expect(await ctxFromToken(s.token)).toBeNull();
     expect(await ctxFromToken(r.token)).not.toBeNull();
@@ -48,11 +52,12 @@ describe("auth", () => {
   it("deactivating a user bumps their session version (signs them out)", async () => {
     const s = await signup(owner);
     const ctx = (await ctxFromToken(s.token))!;
-    const staff = await User.create({ tenantId: ctx.tenantId, email: "st@tt.test", name: "St", role: "STOREROOM_MANAGER", passwordHash: "x" });
-    await updateUser(ctx, String(staff._id), { role: "STOREROOM_MANAGER", active: false });
-    const after = await User.findById(staff._id).lean();
-    expect(after!.active).toBe(false);
-    expect(after!.sessionVersion).toBe(2);
+    const db = await getDb();
+    const [staff] = await db.insert(users).values({ tenantId: ctx.tenantId, email: "st@tt.test", name: "St", role: "STOREROOM_MANAGER", passwordHash: "x" }).returning();
+    await updateUser(ctx, staff.id, { role: "STOREROOM_MANAGER", active: false });
+    const [after] = await db.select().from(users).where(eq(users.id, staff.id));
+    expect(after.active).toBe(false);
+    expect(after.sessionVersion).toBe(2);
   });
 
   it("garbage or missing tokens give no context", async () => {

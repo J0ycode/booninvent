@@ -1,8 +1,9 @@
 import "server-only";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { connectDb } from "./db";
-import { User, Tenant } from "./models/core";
+import { eq } from "drizzle-orm";
+import { getDb } from "./db";
+import { users, tenants } from "./db/schema";
 import { SESSION_COOKIE, verifySession } from "./auth/session";
 import { resolveTenantId } from "./tenancy";
 import { AppError } from "./errors";
@@ -22,24 +23,27 @@ export interface TenantCtx extends Ctx {
   tenantId: string;
 }
 
+const UUID = /^[0-9a-f-]{36}$/i;
+
 export async function ctxFromToken(token: string | undefined, host?: string | null): Promise<Ctx | null> {
   const s = await verifySession(token);
   if (!s) return null;
-  await connectDb();
-  const user = await User.findById(s.sub).lean();
+  if (!UUID.test(s.sub)) return null;
+  const db = await getDb();
+  const [user] = await db.select().from(users).where(eq(users.id, s.sub));
   if (!user || !user.active || user.sessionVersion !== s.sv || user.role !== s.role) return null;
   const tenantId = resolveTenantId(user, host);
   let tenantStatus: Ctx["tenantStatus"] = null;
   if (tenantId) {
-    const t = await Tenant.findById(tenantId, { status: 1 }).lean();
+    const [t] = await db.select({ status: tenants.status }).from(tenants).where(eq(tenants.id, tenantId));
     if (!t) return null;
     tenantStatus = t.status;
   }
   return {
-    userId: String(user._id),
+    userId: user.id,
     role: user.role,
     tenantId,
-    locationIds: (user.locationIds ?? []).map(String),
+    locationIds: user.locationIds ?? [],
     tenantStatus,
     name: user.name,
     email: user.email,

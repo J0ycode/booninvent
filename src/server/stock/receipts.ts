@@ -1,8 +1,9 @@
 import "server-only";
 import { z } from "zod";
-import { Receipt, Supplier, ProductCost, type ReceiptDoc } from "../models/business";
-import { Location } from "../models/core";
-import { guard, tf } from "../data/guard";
+import { and, count, desc, eq, gte, lte } from "drizzle-orm";
+import { getDb } from "../db";
+import { receipts, suppliers, productCosts, locations } from "../db/schema";
+import { guard, tf, assertId } from "../data/guard";
 import { runMutation, nextSeq, docNumber } from "../mutation";
 import { AppError } from "../errors";
 import { applyMoves, mergeLines } from "./core";
@@ -41,15 +42,15 @@ export interface ReceiptView {
   createdBy: string;
   createdAt: string;
 }
-const view = (r: ReceiptDoc): ReceiptView => ({
-  id: String(r._id),
+const view = (r: typeof receipts.$inferSelect): ReceiptView => ({
+  id: r.id,
   number: r.number,
-  supplierId: String(r.supplierId),
+  supplierId: r.supplierId,
   invoiceNumber: r.invoiceNumber,
-  note: r.note,
-  lines: r.lines.map((l) => ({ productId: String(l.productId), quantity: l.quantity, cost: l.cost ?? null })),
+  note: r.note ?? undefined,
+  lines: r.lines.map((l) => ({ productId: l.productId, quantity: l.quantity, cost: l.cost ?? null })),
   totalPieces: r.lines.reduce((s, l) => s + l.quantity, 0),
-  createdBy: String(r.createdBy),
+  createdBy: r.createdBy,
   createdAt: r.createdAt.toISOString(),
 });
 
@@ -58,46 +59,68 @@ export async function receiveStock(ctx: Ctx | null, input: unknown, idempotencyK
   const c = await guard(ctx, MANAGERS);
   const d = receiveSchema.parse(input);
   const lines = mergeLines(d.lines);
-  return runMutation(c, { action: "stock.receive", entity: "receipt", idempotencyKey }, async (session) => {
-    const supplier = await Supplier.findOne({ ...tf(c), _id: d.supplierId }).session(session).lean();
-    const storeRoom = await Location.findOne({ ...tf(c), type: "STORE_ROOM" }).session(session).lean();
+  return runMutation(c, { action: "stock.receive", entity: "receipt", idempotencyKey }, async (tx) => {
+    const [supplier] = await tx
+      .select({ name: suppliers.name })
+      .from(suppliers)
+      .where(and(eq(suppliers.tenantId, c.tenantId), eq(suppliers.id, d.supplierId)));
+    const [storeRoom] = await tx
+      .select({ id: locations.id })
+      .from(locations)
+      .where(and(eq(locations.tenantId, c.tenantId), eq(locations.type, "STORE_ROOM")));
     if (!supplier) throw new AppError("VALIDATION", "Pick one of your suppliers.");
     if (!storeRoom) throw new AppError("NOT_FOUND", "Store Room not found.");
-    const number = docNumber("RCV", await nextSeq(c.tenantId, "receipt", session));
-    const [r] = await Receipt.create(
-      [{ ...tf(c), number, supplierId: d.supplierId, invoiceNumber: d.invoiceNumber, locationId: storeRoom._id, lines, note: d.note, createdBy: c.userId }],
-      { session },
-    );
+    const number = docNumber("RCV", await nextSeq(c.tenantId, "receipt", tx));
+    const [r] = await tx
+      .insert(receipts)
+      .values({ ...tf(c), number, supplierId: d.supplierId, invoiceNumber: d.invoiceNumber, locationId: storeRoom.id, lines, note: d.note, createdBy: c.userId })
+      .returning();
     await applyMoves(
       c,
-      session,
-      lines.map((l) => ({ productId: l.productId, locationId: String(storeRoom._id), delta: l.quantity, type: "RECEIPT" as const })),
-      { refType: "receipt", refId: String(r._id) },
+      tx,
+      lines.map((l) => ({ productId: l.productId, locationId: storeRoom.id, delta: l.quantity, type: "RECEIPT" as const })),
+      { refType: "receipt", refId: r.id },
     );
     for (const l of lines) {
-      if (l.cost !== null) await ProductCost.updateOne({ ...tf(c), productId: l.productId }, { $set: { costPrice: l.cost } }, { upsert: true, session });
+      if (l.cost === null) continue;
+      await tx
+        .insert(productCosts)
+        .values({ ...tf(c), productId: l.productId, costPrice: l.cost })
+        .onConflictDoUpdate({ target: [productCosts.tenantId, productCosts.productId], set: { costPrice: l.cost, updatedAt: new Date() } });
     }
-    return { result: view(r.toObject()), entityId: String(r._id), audit: { number, supplier: supplier.name, invoiceNumber: d.invoiceNumber, lines: lines.length } };
+    return { result: view(r), entityId: r.id, audit: { number, supplier: supplier.name, invoiceNumber: d.invoiceNumber, lines: lines.length } };
   });
 }
 
 export async function listReceipts(ctx: Ctx | null, opts: { page?: number; pageSize?: number; from?: Date; to?: Date } = {}) {
   const c = await guard(ctx, MANAGERS);
-  const filter: Record<string, unknown> = { ...tf(c) };
-  if (opts.from || opts.to) filter.createdAt = { ...(opts.from ? { $gte: opts.from } : {}), ...(opts.to ? { $lte: opts.to } : {}) };
+  const where = and(
+    eq(receipts.tenantId, c.tenantId),
+    opts.from ? gte(receipts.createdAt, opts.from) : undefined,
+    opts.to ? lte(receipts.createdAt, opts.to) : undefined,
+  );
   const pageSize = Math.min(opts.pageSize ?? 25, 100);
   const page = Math.max(opts.page ?? 1, 1);
-  const [rows, total] = await Promise.all([
-    Receipt.find(filter).sort({ createdAt: -1 }).skip((page - 1) * pageSize).limit(pageSize).lean(),
-    Receipt.countDocuments(filter),
-  ]);
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(receipts)
+    .where(where)
+    .orderBy(desc(receipts.createdAt), desc(receipts.number))
+    .limit(pageSize)
+    .offset((page - 1) * pageSize);
+  const [{ total }] = await db.select({ total: count() }).from(receipts).where(where);
   return { rows: rows.map(view), total, page, pageSize };
 }
 
 export async function getReceipt(ctx: Ctx | null, id: string): Promise<ReceiptView> {
   const c = await guard(ctx, MANAGERS);
-  if (!objectId.safeParse(id).success) throw new AppError("NOT_FOUND", "Receipt not found.");
-  const r = await Receipt.findOne({ ...tf(c), _id: id }).lean();
+  assertId(id, "Receipt not found.");
+  const db = await getDb();
+  const [r] = await db
+    .select()
+    .from(receipts)
+    .where(and(eq(receipts.tenantId, c.tenantId), eq(receipts.id, id)));
   if (!r) throw new AppError("NOT_FOUND", "Receipt not found.");
   return view(r);
 }

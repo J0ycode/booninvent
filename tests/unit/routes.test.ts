@@ -18,7 +18,7 @@ function routeFiles(dir: string): string[] {
   });
 }
 
-const FAKE_ID = "64b000000000000000000000";
+const FAKE_ID = "64b00000-0000-4000-8000-000000000000";
 const urlFor = (file: string) =>
   "http://test/api/" +
   path

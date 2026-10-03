@@ -40,5 +40,21 @@ export class AppError extends Error {
   }
 }
 
-export const isDuplicateKey = (e: unknown): boolean =>
-  typeof e === "object" && e !== null && (e as { code?: number }).code === 11000;
+/** Postgres error details, unwrapping the driver/ORM wrapper if there is one. */
+function pgError(e: unknown): { code?: string; constraint?: string } | null {
+  let cur: unknown = e;
+  for (let i = 0; i < 4 && cur && typeof cur === "object"; i++) {
+    const o = cur as { code?: unknown; constraint?: unknown; constraint_name?: unknown; cause?: unknown };
+    if (typeof o.code === "string" && /^[0-9A-Z]{5}$/.test(o.code)) {
+      return { code: o.code, constraint: (o.constraint_name ?? o.constraint) as string | undefined };
+    }
+    cur = o.cause;
+  }
+  return null;
+}
+
+/** Unique-constraint violation (Postgres 23505). */
+export const isDuplicateKey = (e: unknown): boolean => pgError(e)?.code === "23505";
+
+/** Name of the violated unique constraint/index, e.g. "products_tenant_barcode_uq". */
+export const duplicateConstraint = (e: unknown): string => (isDuplicateKey(e) ? (pgError(e)?.constraint ?? "") : "");

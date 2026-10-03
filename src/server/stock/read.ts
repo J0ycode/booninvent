@@ -1,35 +1,40 @@
 import "server-only";
-import { Types } from "mongoose";
-import { StockLevel, StockMovement, type MovementType } from "../models/stock";
-import { Product } from "../models/business";
-import { guard, tf, assertLocationAccess } from "../data/guard";
+import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, lte, sql } from "drizzle-orm";
+import { getDb } from "../db";
+import { stockLevels, stockMovements } from "../db/stock-schema";
+import { products } from "../db/schema";
+import { productSearch } from "../db/helpers";
+import type { MovementType } from "../db/types";
+import { guard, assertLocationAccess, isId, assertId } from "../data/guard";
 import type { Ctx, TenantCtx } from "../context";
 
-/* Read-only stock queries. They live here because only src/server/stock may import the stock models. */
+/* Read-only stock queries. They live here because only src/server/stock may import the stock tables. */
 
 const ALL_ROLES = ["OWNER", "STOREROOM_MANAGER", "STORE_STAFF"] as const;
 
-/** Locations this user may see stock for (STORE_STAFF: own store only). */
+/** Locations this user may see stock for (STORE_STAFF: own store only). null = every location of the shop. */
 function visibleLocations(ctx: TenantCtx, locationIds?: string[]): string[] | null {
   if (ctx.role === "STORE_STAFF") {
     const ids = locationIds?.length ? locationIds : ctx.locationIds;
     ids.forEach((id) => assertLocationAccess(ctx, id));
     return ids;
   }
-  return locationIds?.length ? locationIds : null;
+  return locationIds?.length ? locationIds.filter(isId) : null;
 }
 
 /** Map productId -> locationId -> quantity. */
 export async function getLevels(ctx: Ctx | null, productIds: string[], locationIds?: string[]) {
   const c = await guard(ctx, ALL_ROLES);
   const locs = visibleLocations(c, locationIds);
-  const rows = await StockLevel.find({
-    ...tf(c),
-    productId: { $in: productIds },
-    ...(locs ? { locationId: { $in: locs } } : {}),
-  }).lean();
+  const ids = productIds.filter(isId);
   const out: Record<string, Record<string, number>> = {};
-  for (const r of rows) (out[String(r.productId)] ??= {})[String(r.locationId)] = r.quantity;
+  if (!ids.length || (locs && !locs.length)) return out;
+  const db = await getDb();
+  const rows = await db
+    .select({ productId: stockLevels.productId, locationId: stockLevels.locationId, quantity: stockLevels.quantity })
+    .from(stockLevels)
+    .where(and(eq(stockLevels.tenantId, c.tenantId), inArray(stockLevels.productId, ids), locs ? inArray(stockLevels.locationId, locs) : undefined));
+  for (const r of rows) (out[r.productId] ??= {})[r.locationId] = r.quantity;
   return out;
 }
 
@@ -37,10 +42,15 @@ export async function getLevels(ctx: Ctx | null, productIds: string[], locationI
 export async function locationTotals(ctx: Ctx | null, locationId: string) {
   const c = await guard(ctx, ALL_ROLES);
   assertLocationAccess(c, locationId);
-  const [r] = await StockLevel.aggregate<{ pieces: number; skus: number }>([
-    { $match: { tenantId: new Types.ObjectId(c.tenantId), locationId: new Types.ObjectId(locationId) } },
-    { $group: { _id: null, pieces: { $sum: "$quantity" }, skus: { $sum: { $cond: [{ $gt: ["$quantity", 0] }, 1, 0] } } } },
-  ]);
+  assertId(locationId, "Location not found.");
+  const db = await getDb();
+  const [r] = await db
+    .select({
+      pieces: sql<number>`coalesce(sum(${stockLevels.quantity}), 0)::int`,
+      skus: sql<number>`(count(*) filter (where ${stockLevels.quantity} > 0))::int`,
+    })
+    .from(stockLevels)
+    .where(and(eq(stockLevels.tenantId, c.tenantId), eq(stockLevels.locationId, locationId)));
   return { pieces: r?.pieces ?? 0, skus: r?.skus ?? 0 };
 }
 
@@ -65,37 +75,43 @@ export async function listMovements(
 ) {
   const c = await guard(ctx, ALL_ROLES);
   const locs = visibleLocations(c, opts.locationId ? [opts.locationId] : undefined);
-  const filter: Record<string, unknown> = { ...tf(c) };
-  if (locs) filter.locationId = { $in: locs };
-  if (opts.productId) filter.productId = opts.productId;
-  if (opts.types?.length) filter.type = { $in: opts.types };
-  if (opts.from || opts.to) filter.createdAt = { ...(opts.from ? { $gte: opts.from } : {}), ...(opts.to ? { $lte: opts.to } : {}) };
   const pageSize = Math.min(opts.pageSize ?? 25, 5000);
   const page = Math.max(1, opts.page ?? 1);
-  const [rows, total] = await Promise.all([
-    StockMovement.find(filter)
-      .sort({ createdAt: -1, _id: -1 })
-      .skip((page - 1) * pageSize)
-      .limit(pageSize)
-      .lean(),
-    StockMovement.countDocuments(filter),
-  ]);
+  // A filter that cannot match anything (unknown id) gives an empty page instead of a database error.
+  if ((locs && !locs.length) || (opts.productId && !isId(opts.productId))) return { total: 0, page, pageSize, rows: [] as MovementView[] };
+  const where = and(
+    eq(stockMovements.tenantId, c.tenantId),
+    locs ? inArray(stockMovements.locationId, locs) : undefined,
+    opts.productId ? eq(stockMovements.productId, opts.productId) : undefined,
+    opts.types?.length ? inArray(stockMovements.type, opts.types) : undefined,
+    opts.from ? gte(stockMovements.createdAt, opts.from) : undefined,
+    opts.to ? lte(stockMovements.createdAt, opts.to) : undefined,
+  );
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(stockMovements)
+    .where(where)
+    .orderBy(desc(stockMovements.createdAt), desc(stockMovements.seq))
+    .limit(pageSize)
+    .offset((page - 1) * pageSize);
+  const [{ total }] = await db.select({ total: count() }).from(stockMovements).where(where);
   return {
     total,
     page,
     pageSize,
     rows: rows.map(
       (m): MovementView => ({
-        id: String(m._id),
-        productId: String(m.productId),
-        locationId: String(m.locationId),
+        id: m.id,
+        productId: m.productId,
+        locationId: m.locationId,
         type: m.type,
         quantityDelta: m.quantityDelta,
         balanceAfter: m.balanceAfter,
         refType: m.refType,
         refId: m.refId,
-        userId: m.userId ? String(m.userId) : null,
-        note: m.note,
+        userId: m.userId,
+        note: m.note ?? undefined,
         createdAt: m.createdAt.toISOString(),
       }),
     ),
@@ -110,36 +126,51 @@ export async function levelsAtLocation(
 ): Promise<{ productId: string; quantity: number }[]> {
   const c = await guard(ctx, ALL_ROLES);
   assertLocationAccess(c, locationId);
-  const filter: Record<string, unknown> = { ...tf(c), locationId };
-  if (opts.productIds) filter.productId = { $in: opts.productIds };
-  if (opts.maxQty !== undefined) filter.quantity = { $lte: opts.maxQty };
-  const rows = await StockLevel.find(filter, { productId: 1, quantity: 1 }).lean();
-  return rows.map((r) => ({ productId: String(r.productId), quantity: r.quantity }));
+  assertId(locationId, "Location not found.");
+  const ids = opts.productIds?.filter(isId);
+  if (ids && !ids.length) return [];
+  const db = await getDb();
+  return db
+    .select({ productId: stockLevels.productId, quantity: stockLevels.quantity })
+    .from(stockLevels)
+    .where(
+      and(
+        eq(stockLevels.tenantId, c.tenantId),
+        eq(stockLevels.locationId, locationId),
+        ids ? inArray(stockLevels.productId, ids) : undefined,
+        opts.maxQty !== undefined ? lte(stockLevels.quantity, opts.maxQty) : undefined,
+      ),
+    );
 }
 
 /**
  * Store products at or below their reorder level (only products the store has carried: a stock row exists).
- * Uses $lookup into products, so it lives with the other stock reads.
+ * Joins products, so it lives with the other stock reads.
  */
 export async function lowStockAt(ctx: Ctx | null, locationId: string): Promise<{ productId: string; quantity: number; reorderLevel: number }[]> {
   const c = await guard(ctx, ALL_ROLES);
   assertLocationAccess(c, locationId);
-  const rows = await StockLevel.aggregate<{ productId: Types.ObjectId; quantity: number; reorderLevel: number }>([
-    { $match: { tenantId: new Types.ObjectId(c.tenantId), locationId: new Types.ObjectId(locationId) } },
-    { $lookup: { from: "products", localField: "productId", foreignField: "_id", as: "p", pipeline: [{ $project: { reorderLevel: 1, active: 1 } }] } },
-    { $unwind: "$p" },
-    { $match: { "p.active": true, "p.reorderLevel": { $gt: 0 }, $expr: { $lte: ["$quantity", "$p.reorderLevel"] } } },
-    { $project: { productId: 1, quantity: 1, reorderLevel: "$p.reorderLevel" } },
-  ]);
-  return rows.map((r) => ({ productId: String(r.productId), quantity: r.quantity, reorderLevel: r.reorderLevel }));
+  assertId(locationId, "Location not found.");
+  const db = await getDb();
+  return db
+    .select({ productId: stockLevels.productId, quantity: stockLevels.quantity, reorderLevel: products.reorderLevel })
+    .from(stockLevels)
+    .innerJoin(products, and(eq(products.id, stockLevels.productId), eq(products.tenantId, stockLevels.tenantId)))
+    .where(
+      and(
+        eq(stockLevels.tenantId, c.tenantId),
+        eq(stockLevels.locationId, locationId),
+        eq(products.active, true),
+        gt(products.reorderLevel, 0),
+        lte(stockLevels.quantity, products.reorderLevel),
+      ),
+    );
 }
 
 /** Count of low-stock products per location, for dashboards. */
 export async function lowStockCount(ctx: Ctx | null, locationId: string) {
   return (await lowStockAt(ctx, locationId)).length;
 }
-
-const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export interface StockRow {
   productId: string;
@@ -164,50 +195,42 @@ export async function stockAtLocation(
 ) {
   const c = await guard(ctx, ALL_ROLES);
   assertLocationAccess(c, locationId);
-  const tenantId = new Types.ObjectId(c.tenantId);
-  const loc = new Types.ObjectId(locationId);
+  assertId(locationId, "Location not found.");
   const pageSize = Math.min(opts.pageSize ?? 25, 10000);
   const page = Math.max(opts.page ?? 1, 1);
-  const match: Record<string, unknown> = { tenantId, active: true };
-  const q = opts.q?.trim();
-  if (q) match.$or = [{ barcode: q }, { sku: { $regex: `^${escapeRe(q)}`, $options: "i" } }, { nameLower: { $regex: escapeRe(q.toLowerCase()) } }];
-  const pipeline: Record<string, unknown>[] = [
-    { $match: match },
-    { $lookup: { from: "stocklevels", let: { pid: "$_id" }, pipeline: [{ $match: { $expr: { $and: [{ $eq: ["$productId", "$$pid"] }, { $eq: ["$locationId", loc] }, { $eq: ["$tenantId", tenantId] }] } } }, { $project: { quantity: 1 } }], as: "lvl" } },
-    { $addFields: { carried: { $gt: [{ $size: "$lvl" }, 0] }, quantity: { $ifNull: [{ $first: "$lvl.quantity" }, 0] } } },
-  ];
-  if (!opts.includeUnstocked) pipeline.push({ $match: { carried: true } });
-  if (opts.low) pipeline.push({ $match: { reorderLevel: { $gt: 0 }, $expr: { $lte: ["$quantity", "$reorderLevel"] } } });
-  pipeline.push({
-    $facet: {
-      rows: [{ $sort: { nameLower: 1, _id: 1 } }, { $skip: (page - 1) * pageSize }, { $limit: pageSize }],
-      total: [{ $count: "n" }],
-      sum: [{ $group: { _id: null, pieces: { $sum: "$quantity" } } }],
-    },
-  });
-  const [res] = await Product.aggregate<{
-    rows: (StockRow & { _id: Types.ObjectId })[];
-    total: { n: number }[];
-    sum: { pieces: number }[];
-  }>(pipeline as never);
-  return {
-    rows: res.rows.map(
-      (r): StockRow => ({
-        productId: String(r._id),
-        name: r.name,
-        sku: r.sku,
-        barcode: r.barcode,
-        category: r.category,
-        sellingPrice: r.sellingPrice,
-        reorderLevel: r.reorderLevel,
-        quantity: r.quantity,
-      }),
-    ),
-    total: res.total[0]?.n ?? 0,
-    pieces: res.sum[0]?.pieces ?? 0,
-    page,
-    pageSize,
-  };
+  const quantity = sql<number>`coalesce(${stockLevels.quantity}, 0)`;
+  const onLevel = and(eq(stockLevels.productId, products.id), eq(stockLevels.locationId, locationId), eq(stockLevels.tenantId, c.tenantId));
+  const where = and(
+    eq(products.tenantId, c.tenantId),
+    eq(products.active, true),
+    productSearch(opts.q),
+    opts.includeUnstocked ? undefined : isNotNull(stockLevels.productId), // carried: a stock row exists
+    opts.low ? and(gt(products.reorderLevel, 0), sql`${quantity} <= ${products.reorderLevel}`) : undefined,
+  );
+  const db = await getDb();
+  const rows = await db
+    .select({
+      productId: products.id,
+      name: products.name,
+      sku: products.sku,
+      barcode: products.barcode,
+      category: products.category,
+      sellingPrice: products.sellingPrice,
+      reorderLevel: products.reorderLevel,
+      quantity: sql<number>`${quantity}::int`,
+    })
+    .from(products)
+    .leftJoin(stockLevels, onLevel)
+    .where(where)
+    .orderBy(asc(products.nameLower), asc(products.id))
+    .limit(pageSize)
+    .offset((page - 1) * pageSize);
+  const [sum] = await db
+    .select({ total: count(), pieces: sql<number>`coalesce(sum(${quantity}), 0)::int` })
+    .from(products)
+    .leftJoin(stockLevels, onLevel)
+    .where(where);
+  return { rows: rows as StockRow[], total: sum?.total ?? 0, pieces: sum?.pieces ?? 0, page, pageSize };
 }
 
 /** Low-stock count at a location (Store Room counts never-received products as 0). */

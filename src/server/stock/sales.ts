@@ -1,11 +1,11 @@
 import "server-only";
 import { z } from "zod";
-import { Sale, Product, type SaleDoc } from "../models/business";
-import { Location } from "../models/core";
+import { and, eq, inArray } from "drizzle-orm";
+import { getDb } from "../db";
+import { sales, products, locations } from "../db/schema";
 import { guard, tf, assertLocationAccess } from "../data/guard";
 import { runMutation } from "../mutation";
-import { AppError, isDuplicateKey } from "../errors";
-import { connectDb } from "../db";
+import { AppError, duplicateConstraint } from "../errors";
 import { applyMoves } from "./core";
 import { objectId } from "@/lib/validation";
 import type { Ctx, TenantCtx } from "../context";
@@ -41,20 +41,28 @@ export interface SaleResult {
   createdAt: string;
 }
 
-const result = (s: SaleDoc, duplicate: boolean, balances?: Map<string, number>): SaleResult => ({
-  saleId: String(s._id),
+const result = (s: typeof sales.$inferSelect, duplicate: boolean, balances?: Map<string, number>): SaleResult => ({
+  saleId: s.id,
   externalRef: s.externalRef,
-  locationId: String(s.locationId),
+  locationId: s.locationId,
   duplicate,
-  items: s.items.map((i) => ({ barcode: i.barcode, productId: String(i.productId), quantity: i.quantity, balanceAfter: balances?.get(String(i.productId)) ?? null })),
+  items: s.items.map((i) => ({ barcode: i.barcode, productId: i.productId, quantity: i.quantity, balanceAfter: balances?.get(i.productId) ?? null })),
   createdAt: s.createdAt.toISOString(),
 });
+
+async function findSale(c: TenantCtx, externalRef: string) {
+  const db = await getDb();
+  const [s] = await db
+    .select()
+    .from(sales)
+    .where(and(eq(sales.tenantId, c.tenantId), eq(sales.externalRef, externalRef)));
+  return s;
+}
 
 /** Core sale logic for an already-authorized tenant context. */
 export async function applySale(c: TenantCtx, input: unknown, source: "API" | "INTERNAL"): Promise<SaleResult> {
   const d = saleSchema.parse(input);
-  await connectDb();
-  const existing = await Sale.findOne({ ...tf(c), externalRef: d.externalRef }).lean();
+  const existing = await findSale(c, d.externalRef);
   if (existing) return result(existing, true);
 
   // Merge repeated barcodes.
@@ -62,29 +70,38 @@ export async function applySale(c: TenantCtx, input: unknown, source: "API" | "I
   for (const i of d.items) qtyByBarcode.set(i.barcode, (qtyByBarcode.get(i.barcode) ?? 0) + i.quantity);
 
   try {
-    return await runMutation(c, { action: source === "API" ? "sale.api" : "sale.internal", entity: "sale" }, async (session) => {
-      const loc = await Location.findOne({ ...tf(c), _id: d.locationId }).session(session).lean();
+    return await runMutation(c, { action: source === "API" ? "sale.api" : "sale.internal", entity: "sale" }, async (tx) => {
+      const [loc] = await tx
+        .select({ type: locations.type })
+        .from(locations)
+        .where(and(eq(locations.tenantId, c.tenantId), eq(locations.id, d.locationId)));
       if (!loc || loc.type !== "STORE") throw new AppError("INVALID_LOCATION", "locationId must be one of this shop's stores.", { locationId: d.locationId });
-      const products = await Product.find({ ...tf(c), barcode: { $in: [...qtyByBarcode.keys()] } }, { barcode: 1 }).session(session).lean();
-      const byBarcode = new Map(products.map((p) => [p.barcode, String(p._id)]));
+      const found = await tx
+        .select({ id: products.id, barcode: products.barcode })
+        .from(products)
+        .where(and(eq(products.tenantId, c.tenantId), inArray(products.barcode, [...qtyByBarcode.keys()])));
+      const byBarcode = new Map(found.map((p) => [p.barcode, p.id]));
       const unknown = [...qtyByBarcode.keys()].filter((b) => !byBarcode.has(b));
       if (unknown.length) throw new AppError("UNKNOWN_BARCODE", `Unknown barcode: ${unknown.join(", ")}`, { barcodes: unknown });
 
       const items = [...qtyByBarcode].map(([barcode, quantity]) => ({ barcode, quantity, productId: byBarcode.get(barcode)! }));
-      const [sale] = await Sale.create([{ ...tf(c), locationId: d.locationId, externalRef: d.externalRef, source, items }], { session });
+      const [sale] = await tx
+        .insert(sales)
+        .values({ ...tf(c), locationId: d.locationId, externalRef: d.externalRef, source, items })
+        .returning();
       const res = await applyMoves(
         c,
-        session,
+        tx,
         items.map((i) => ({ productId: i.productId, locationId: d.locationId, delta: -i.quantity, type: "SALE" as const, note: d.externalRef })),
-        { refType: "sale", refId: String(sale._id) },
+        { refType: "sale", refId: sale.id },
       );
       const balances = new Map(res.map((r) => [r.productId, r.balanceAfter]));
-      return { result: result(sale.toObject(), false, balances), entityId: String(sale._id), audit: { externalRef: d.externalRef, source, items: items.length } };
+      return { result: result(sale, false, balances), entityId: sale.id, audit: { externalRef: d.externalRef, source, items: items.length } };
     });
   } catch (e) {
     // A concurrent request with the same externalRef won the race: return its result.
-    if (isDuplicateKey(e) && (e as { keyPattern?: Record<string, unknown> }).keyPattern?.externalRef) {
-      const prev = await Sale.findOne({ ...tf(c), externalRef: d.externalRef }).lean();
+    if (duplicateConstraint(e) === "sales_tenant_external_ref_uq") {
+      const prev = await findSale(c, d.externalRef);
       if (prev) return result(prev, true);
     }
     throw e;

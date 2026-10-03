@@ -1,9 +1,11 @@
 import "server-only";
 import { z } from "zod";
-import type { ClientSession } from "mongoose";
-import { RestockRequest, type RestockDoc, type RestockStatus } from "../models/business";
-import { Product } from "../models/business";
-import { guard, tf, staffLocationId, assertLocationAccess } from "./guard";
+import { randomUUID } from "node:crypto";
+import { and, count, desc, eq, inArray, type SQL } from "drizzle-orm";
+import { getDb, type Tx } from "../db";
+import { restockRequests, products } from "../db/schema";
+import type { RestockLine, RestockStatus } from "../db/types";
+import { guard, tf, staffLocationId, assertLocationAccess, assertId, isId } from "./guard";
 import { runMutation, nextSeq, docNumber } from "../mutation";
 import { AppError } from "../errors";
 import { lowStockAt } from "../stock/read";
@@ -40,23 +42,25 @@ export interface RestockView {
   sentAt: string | null;
 }
 
-function view(r: RestockDoc): RestockView {
+type RestockRow = typeof restockRequests.$inferSelect;
+
+function view(r: RestockRow): RestockView {
   const lines = r.lines.map((l) => ({
-    id: String(l._id),
-    productId: String(l.productId),
+    id: l.id,
+    productId: l.productId,
     quantity: l.quantity,
     suggestedQty: l.suggestedQty ?? null,
     lineStatus: l.lineStatus,
   }));
   return {
-    id: String(r._id),
+    id: r.id,
     number: r.number,
-    locationId: String(r.locationId),
+    locationId: r.locationId,
     source: r.source,
     status: r.status,
-    note: r.note,
-    rejectReason: r.rejectReason,
-    dispatchId: r.dispatchId ? String(r.dispatchId) : null,
+    note: r.note ?? undefined,
+    rejectReason: r.rejectReason ?? undefined,
+    dispatchId: r.dispatchId,
     lines,
     approvedPieces: lines.filter((l) => l.lineStatus === "APPROVED").reduce((s, l) => s + l.quantity, 0),
     pendingLines: lines.filter((l) => l.lineStatus === "PENDING").length,
@@ -65,20 +69,38 @@ function view(r: RestockDoc): RestockView {
   };
 }
 
-function visibility(c: TenantCtx): Record<string, unknown> {
-  if (c.role === "STORE_STAFF") return { ...tf(c), locationId: { $in: c.locationIds } };
-  return { ...tf(c), status: { $in: VISIBLE_TO_STOREROOM } };
+/** Store staff see their own store's requests; the Store Room sees forwarded ones. null = sees nothing. */
+function visibility(c: TenantCtx): SQL | null {
+  if (c.role === "STORE_STAFF") {
+    if (!c.locationIds.length) return null;
+    return and(eq(restockRequests.tenantId, c.tenantId), inArray(restockRequests.locationId, c.locationIds))!;
+  }
+  return and(eq(restockRequests.tenantId, c.tenantId), inArray(restockRequests.status, VISIBLE_TO_STOREROOM))!;
 }
 
-async function load(c: TenantCtx, id: string, session: ClientSession) {
-  if (!objectId.safeParse(id).success) throw new AppError("NOT_FOUND", "Request not found.");
-  const r = await RestockRequest.findOne({ ...visibility(c), _id: id }).session(session);
+/** Loads the request and locks its row until the transaction ends, so it cannot be decided twice. */
+async function load(c: TenantCtx, id: string, tx: Tx): Promise<RestockRow> {
+  const vis = visibility(c);
+  if (!isId(id) || !vis) throw new AppError("NOT_FOUND", "Request not found.");
+  const [r] = await tx
+    .select()
+    .from(restockRequests)
+    .where(and(vis, eq(restockRequests.id, id)))
+    .for("update");
   if (!r) throw new AppError("NOT_FOUND", "Request not found.");
   return r;
 }
 
-async function assertActiveProducts(c: TenantCtx, ids: string[], session: ClientSession) {
-  const n = await Product.countDocuments({ ...tf(c), _id: { $in: ids }, active: true }).session(session);
+async function save(tx: Tx, id: string, set: Partial<typeof restockRequests.$inferInsert>): Promise<RestockRow> {
+  const [r] = await tx.update(restockRequests).set(set).where(eq(restockRequests.id, id)).returning();
+  return r;
+}
+
+async function assertActiveProducts(c: TenantCtx, ids: string[], tx: Tx) {
+  const [{ n }] = await tx
+    .select({ n: count() })
+    .from(products)
+    .where(and(eq(products.tenantId, c.tenantId), inArray(products.id, ids), eq(products.active, true)));
   if (n !== new Set(ids).size) throw new AppError("VALIDATION", "One of the products is not available.");
 }
 
@@ -97,31 +119,29 @@ export async function createManualRequest(ctx: Ctx | null, input: unknown, idemp
   const c = await guard(ctx, ["STORE_STAFF"]);
   const d = manualSchema.parse(input);
   const locationId = staffLocationId(c);
-  return runMutation(c, { action: "restock.create_manual", entity: "restockRequest", idempotencyKey }, async (session) => {
+  return runMutation(c, { action: "restock.create_manual", entity: "restockRequest", idempotencyKey }, async (tx) => {
     const lines = mergeLines(d.lines);
     await assertActiveProducts(
       c,
       lines.map((l) => l.productId),
-      session,
+      tx,
     );
-    const number = docNumber("REQ", await nextSeq(c.tenantId, "restock", session));
-    const [r] = await RestockRequest.create(
-      [
-        {
-          ...tf(c),
-          number,
-          locationId,
-          source: "MANUAL",
-          status: "SENT",
-          sentAt: new Date(),
-          note: d.note,
-          lines: lines.map((l) => ({ ...l, suggestedQty: null, lineStatus: "APPROVED" })),
-          createdBy: c.userId,
-        },
-      ],
-      { session },
-    );
-    return { result: view(r.toObject()), entityId: String(r._id), audit: { number, lines: lines.length } };
+    const number = docNumber("REQ", await nextSeq(c.tenantId, "restock", tx));
+    const [r] = await tx
+      .insert(restockRequests)
+      .values({
+        ...tf(c),
+        number,
+        locationId,
+        source: "MANUAL",
+        status: "SENT",
+        sentAt: new Date(),
+        note: d.note,
+        lines: lines.map((l): RestockLine => ({ id: randomUUID(), productId: l.productId, quantity: l.quantity, suggestedQty: null, lineStatus: "APPROVED" })),
+        createdBy: c.userId,
+      })
+      .returning();
+    return { result: view(r), entityId: r.id, audit: { number, lines: lines.length } };
   });
 }
 
@@ -134,18 +154,20 @@ export async function suggestRestock(ctx: Ctx | null, idempotencyKey?: string): 
   const locationId = staffLocationId(c);
   const low = await lowStockAt(c, locationId);
   if (!low.length) return null;
-  return runMutation(c, { action: "restock.suggest", entity: "restockRequest", idempotencyKey }, async (session) => {
-    await RestockRequest.deleteMany({ ...tf(c), locationId, status: "WAITING_STAFF_APPROVAL" }, { session });
-    const number = docNumber("REQ", await nextSeq(c.tenantId, "restock", session));
-    const lines = low.map((l) => {
+  return runMutation(c, { action: "restock.suggest", entity: "restockRequest", idempotencyKey }, async (tx) => {
+    await tx
+      .delete(restockRequests)
+      .where(and(eq(restockRequests.tenantId, c.tenantId), eq(restockRequests.locationId, locationId), eq(restockRequests.status, "WAITING_STAFF_APPROVAL")));
+    const number = docNumber("REQ", await nextSeq(c.tenantId, "restock", tx));
+    const lines = low.map((l): RestockLine => {
       const suggested = Math.max(1, l.reorderLevel * 2 - l.quantity);
-      return { productId: l.productId, quantity: suggested, suggestedQty: suggested, lineStatus: "PENDING" as const };
+      return { id: randomUUID(), productId: l.productId, quantity: suggested, suggestedQty: suggested, lineStatus: "PENDING" };
     });
-    const [r] = await RestockRequest.create(
-      [{ ...tf(c), number, locationId, source: "SUGGESTED", status: "WAITING_STAFF_APPROVAL", lines, createdBy: c.userId }],
-      { session },
-    );
-    return { result: view(r.toObject()), entityId: String(r._id), audit: { number, lines: lines.length } };
+    const [r] = await tx
+      .insert(restockRequests)
+      .values({ ...tf(c), number, locationId, source: "SUGGESTED", status: "WAITING_STAFF_APPROVAL", lines, createdBy: c.userId })
+      .returning();
+    return { result: view(r), entityId: r.id, audit: { number, lines: lines.length } };
   });
 }
 
@@ -159,39 +181,40 @@ export const lineDecisionSchema = z.object({
 export async function decideSuggestedLine(ctx: Ctx | null, id: string, input: unknown, idempotencyKey?: string): Promise<RestockView> {
   const c = await guard(ctx, ["STORE_STAFF"]);
   const d = lineDecisionSchema.parse(input);
-  return runMutation(c, { action: "restock.decide_line", entity: "restockRequest", idempotencyKey }, async (session) => {
-    const r = await load(c, id, session);
-    if (r.status !== "WAITING_STAFF_APPROVAL") throw new AppError("INVALID_STATE", "This request was already forwarded.");
-    const line = r.lines.find((l) => String(l._id) === d.lineId);
-    if (!line) throw new AppError("NOT_FOUND", "Line not found.");
-    line.lineStatus = d.action === "APPROVE" ? "APPROVED" : "SKIPPED";
-    if (d.action === "APPROVE" && d.quantity) line.quantity = d.quantity;
-    await r.save({ session });
-    return { result: view(r.toObject()), entityId: id, audit: d };
+  return runMutation(c, { action: "restock.decide_line", entity: "restockRequest", idempotencyKey }, async (tx) => {
+    const cur = await load(c, id, tx);
+    if (cur.status !== "WAITING_STAFF_APPROVAL") throw new AppError("INVALID_STATE", "This request was already forwarded.");
+    if (!cur.lines.some((l) => l.id === d.lineId)) throw new AppError("NOT_FOUND", "Line not found.");
+    const lines = cur.lines.map((l): RestockLine =>
+      l.id === d.lineId
+        ? { ...l, lineStatus: d.action === "APPROVE" ? "APPROVED" : "SKIPPED", quantity: d.action === "APPROVE" && d.quantity ? d.quantity : l.quantity }
+        : l,
+    );
+    const r = await save(tx, id, { lines });
+    return { result: view(r), entityId: id, audit: d };
   });
 }
 
 /** Sends a reviewed suggestion to the Store Room. Every line must be approved or skipped first. */
 export async function forwardRequest(ctx: Ctx | null, id: string, idempotencyKey?: string): Promise<RestockView> {
   const c = await guard(ctx, ["STORE_STAFF"]);
-  return runMutation(c, { action: "restock.forward", entity: "restockRequest", idempotencyKey }, async (session) => {
-    const r = await load(c, id, session);
-    if (r.status !== "WAITING_STAFF_APPROVAL") throw new AppError("INVALID_STATE", "This request was already forwarded.");
-    if (r.lines.some((l) => l.lineStatus === "PENDING")) throw new AppError("VALIDATION", "Approve, edit or skip every line before forwarding.");
-    if (!r.lines.some((l) => l.lineStatus === "APPROVED")) throw new AppError("VALIDATION", "Approve at least one line, or discard the suggestion.");
-    r.set({ status: "SENT", sentAt: new Date() });
-    await r.save({ session });
-    return { result: view(r.toObject()), entityId: id, audit: { number: r.number } };
+  return runMutation(c, { action: "restock.forward", entity: "restockRequest", idempotencyKey }, async (tx) => {
+    const cur = await load(c, id, tx);
+    if (cur.status !== "WAITING_STAFF_APPROVAL") throw new AppError("INVALID_STATE", "This request was already forwarded.");
+    if (cur.lines.some((l) => l.lineStatus === "PENDING")) throw new AppError("VALIDATION", "Approve, edit or skip every line before forwarding.");
+    if (!cur.lines.some((l) => l.lineStatus === "APPROVED")) throw new AppError("VALIDATION", "Approve at least one line, or discard the suggestion.");
+    const r = await save(tx, id, { status: "SENT", sentAt: new Date() });
+    return { result: view(r), entityId: id, audit: { number: r.number } };
   });
 }
 
 export async function discardSuggestion(ctx: Ctx | null, id: string, idempotencyKey?: string) {
   const c = await guard(ctx, ["STORE_STAFF"]);
-  return runMutation(c, { action: "restock.discard", entity: "restockRequest", idempotencyKey }, async (session) => {
-    const r = await load(c, id, session);
-    if (r.status !== "WAITING_STAFF_APPROVAL") throw new AppError("INVALID_STATE", "Only an unforwarded suggestion can be discarded.");
-    await RestockRequest.deleteOne({ _id: r._id }, { session });
-    return { result: null, entityId: id, audit: { number: r.number } };
+  return runMutation(c, { action: "restock.discard", entity: "restockRequest", idempotencyKey }, async (tx) => {
+    const cur = await load(c, id, tx);
+    if (cur.status !== "WAITING_STAFF_APPROVAL") throw new AppError("INVALID_STATE", "Only an unforwarded suggestion can be discarded.");
+    await tx.delete(restockRequests).where(eq(restockRequests.id, cur.id));
+    return { result: null, entityId: id, audit: { number: cur.number } };
   });
 }
 
@@ -200,26 +223,24 @@ export async function discardSuggestion(ctx: Ctx | null, id: string, idempotency
 /** Approve: creates a pre-filled DRAFT dispatch with the approved lines, in one step. */
 export async function approveRequest(ctx: Ctx | null, id: string, idempotencyKey?: string): Promise<{ request: RestockView; dispatchId: string }> {
   const c = await guard(ctx, MANAGERS);
-  return runMutation(c, { action: "restock.approve", entity: "restockRequest", idempotencyKey }, async (session) => {
-    const r = await load(c, id, session);
-    if (r.status !== "SENT") throw new AppError("INVALID_STATE", "Only sent requests can be approved.");
-    const lines = r.lines.filter((l) => l.lineStatus === "APPROVED" && l.quantity > 0).map((l) => ({ productId: String(l.productId), quantity: l.quantity }));
-    const draft = await insertDraft(c, session, { toLocationId: String(r.locationId), lines, note: `From request ${r.number}` }, String(r._id));
-    r.set({ status: "APPROVED", decidedBy: c.userId, decidedAt: new Date(), dispatchId: draft._id });
-    await r.save({ session });
-    return { result: { request: view(r.toObject()), dispatchId: String(draft._id) }, entityId: id, audit: { number: r.number, dispatch: draft.number } };
+  return runMutation(c, { action: "restock.approve", entity: "restockRequest", idempotencyKey }, async (tx) => {
+    const cur = await load(c, id, tx);
+    if (cur.status !== "SENT") throw new AppError("INVALID_STATE", "Only sent requests can be approved.");
+    const lines = cur.lines.filter((l) => l.lineStatus === "APPROVED" && l.quantity > 0).map((l) => ({ productId: l.productId, quantity: l.quantity }));
+    const draft = await insertDraft(c, tx, { toLocationId: cur.locationId, lines, note: `From request ${cur.number}` }, cur.id);
+    const r = await save(tx, id, { status: "APPROVED", decidedBy: c.userId, decidedAt: new Date(), dispatchId: draft.id });
+    return { result: { request: view(r), dispatchId: draft.id }, entityId: id, audit: { number: r.number, dispatch: draft.number } };
   });
 }
 
 export async function rejectRequest(ctx: Ctx | null, id: string, input: unknown, idempotencyKey?: string): Promise<RestockView> {
   const c = await guard(ctx, MANAGERS);
   const { reason } = z.object({ reason: z.string().trim().min(2, "Give a short reason").max(300) }).parse(input);
-  return runMutation(c, { action: "restock.reject", entity: "restockRequest", idempotencyKey }, async (session) => {
-    const r = await load(c, id, session);
-    if (r.status !== "SENT") throw new AppError("INVALID_STATE", "Only sent requests can be rejected.");
-    r.set({ status: "REJECTED", rejectReason: reason, decidedBy: c.userId, decidedAt: new Date() });
-    await r.save({ session });
-    return { result: view(r.toObject()), entityId: id, audit: { number: r.number, reason } };
+  return runMutation(c, { action: "restock.reject", entity: "restockRequest", idempotencyKey }, async (tx) => {
+    const cur = await load(c, id, tx);
+    if (cur.status !== "SENT") throw new AppError("INVALID_STATE", "Only sent requests can be rejected.");
+    const r = await save(tx, id, { status: "REJECTED", rejectReason: reason, decidedBy: c.userId, decidedAt: new Date() });
+    return { result: view(r), entityId: id, audit: { number: r.number, reason } };
   });
 }
 
@@ -227,28 +248,43 @@ export async function rejectRequest(ctx: Ctx | null, id: string, input: unknown,
 
 export async function listRequests(ctx: Ctx | null, opts: { status?: RestockStatus; locationId?: string; page?: number; pageSize?: number } = {}) {
   const c = await guard(ctx, ALL);
-  const filter: Record<string, unknown> = { ...visibility(c) };
-  if (opts.status) {
-    if (c.role !== "STORE_STAFF" && !VISIBLE_TO_STOREROOM.includes(opts.status)) return { rows: [], total: 0, page: 1, pageSize: 25 };
-    filter.status = opts.status;
-  }
-  if (opts.locationId) {
-    assertLocationAccess(c, opts.locationId);
-    filter.locationId = opts.locationId;
-  }
   const pageSize = Math.min(opts.pageSize ?? 25, 100);
   const page = Math.max(opts.page ?? 1, 1);
-  const [rows, total] = await Promise.all([
-    RestockRequest.find(filter).sort({ updatedAt: -1 }).skip((page - 1) * pageSize).limit(pageSize).lean(),
-    RestockRequest.countDocuments(filter),
-  ]);
+  const empty = { rows: [] as RestockView[], total: 0, page, pageSize };
+  const vis = visibility(c);
+  if (!vis) return empty;
+  if (opts.status && c.role !== "STORE_STAFF" && !VISIBLE_TO_STOREROOM.includes(opts.status)) return empty;
+  if (opts.locationId) {
+    assertLocationAccess(c, opts.locationId);
+    if (!isId(opts.locationId)) return empty;
+  }
+  const where = and(
+    vis,
+    opts.status ? eq(restockRequests.status, opts.status) : undefined,
+    opts.locationId ? eq(restockRequests.locationId, opts.locationId) : undefined,
+  );
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(restockRequests)
+    .where(where)
+    .orderBy(desc(restockRequests.updatedAt), desc(restockRequests.number))
+    .limit(pageSize)
+    .offset((page - 1) * pageSize);
+  const [{ total }] = await db.select({ total: count() }).from(restockRequests).where(where);
   return { rows: rows.map(view), total, page, pageSize };
 }
 
 export async function getRequest(ctx: Ctx | null, id: string): Promise<RestockView> {
   const c = await guard(ctx, ALL);
-  if (!objectId.safeParse(id).success) throw new AppError("NOT_FOUND", "Request not found.");
-  const r = await RestockRequest.findOne({ ...visibility(c), _id: id }).lean();
+  assertId(id, "Request not found.");
+  const vis = visibility(c);
+  if (!vis) throw new AppError("NOT_FOUND", "Request not found.");
+  const db = await getDb();
+  const [r] = await db
+    .select()
+    .from(restockRequests)
+    .where(and(vis, eq(restockRequests.id, id)));
   if (!r) throw new AppError("NOT_FOUND", "Request not found.");
   return view(r);
 }

@@ -7,10 +7,10 @@ Each entry: decision, reason, alternative considered.
 | 1 | App at the root of `boon-inven`, its own git repo, remote `github.com/J0ycode/booninvent` | User's choice; clean start separate from the earlier Supabase attempt | Rebuild in the old folder |
 | 2 | Sessions: signed JWT (jose, HS256) in an httpOnly cookie, and the user is re-checked in the DB on every request (`sessionVersion`) | Simple with email+password; instant revocation on deactivate or password reset | Auth.js credentials provider (heavier, and its JWT mode still needs custom revocation) |
 | 3 | bcryptjs (cost 12) | Pure JS, no native build problems on Windows or Vercel | argon2 (native addon) |
-| 4 | Login rate limit: 5 per email and 30 per IP per 15 minutes, stored in MongoDB with a TTL index | Works on serverless without Redis | In-memory limiter (not shared across instances) |
+| 4 | Login rate limit: 5 per email and 30 per IP per 15 minutes, stored in the database with an expiry time (see 64) | Works on serverless without Redis | In-memory limiter (not shared across instances) |
 | 5 | Next.js 16 `proxy.ts` only routes (signed-out goes to /login, wrong portal goes to own portal); real checks run in the data layer | Proxy is a fast gate; authorization must not depend on it | Authorization in the proxy |
-| 6 | Idempotency: an `idempotencyKeys` collection (unique scope+key, 24h TTL) written in the same transaction as the change; a repeat returns the stored result | Exactly-once even with double clicks and retries | Client-only button disabling |
-| 7 | Document numbers and auto barcodes use per-tenant counters (`counters` collection) | Short, readable, unique per tenant | Random ids |
+| 6 | Idempotency: an `idempotency_keys` table (unique scope+key, kept 24h) written in the same transaction as the change; a repeat returns the stored result | Exactly-once even with double clicks and retries | Client-only button disabling |
+| 7 | Document numbers and auto barcodes use per-tenant counters (`counters` table) | Short, readable, unique per tenant | Random ids |
 | 8 | Money stored as integer paise | No float rounding errors | Decimal128 |
 | 9 | shadcn/ui "base-nova" (Base UI primitives), native `<select>` for dropdowns | Current shadcn default; native selects are the best phone experience and accessible | Radix-based select |
 | 10 | TanStack Table v8 (pinned) | v9 changed the API substantially; v8 is stable and documented | v9 |
@@ -60,3 +60,12 @@ Each entry: decision, reason, alternative considered.
 | 54 | Security headers: nosniff, SAMEORIGIN framing, strict referrer, HSTS, `Permissions-Policy: camera=(self)` | Best-practice score; the camera stays available for scanning | No headers |
 | 55 | Error logging: structured JSON lines via `onRequestError` (Vercel Logs) plus an optional webhook; no third-party SDK | Zero setup, no extra cost; easy to point at Slack/Discord/Logtail | Sentry SDK |
 | 56 | Friendly `error.tsx` (Try again + digest), `not-found.tsx`, and skeleton `loading.tsx` per portal | Graceful handling of slow or failed connections | Default Next.js pages |
+| 57 | Database moved from MongoDB to **Supabase Postgres**, database only: the app keeps its own login, sessions, roles and tenant checks | Owner's request. Changing the database and the login system at once would double the risk, and the data layer already enforces tenant safety | Supabase Auth + RLS policies per tenant (a rewrite of auth and of every query's security model) |
+| 58 | Drizzle ORM with the postgres-js driver; SQL migrations in `drizzle/` | Typed SQL, small, works on serverless; migrations are plain SQL files that can be reviewed | Prisma (heavier engine), supabase-js (REST, no multi-statement transactions) |
+| 59 | Tests, e2e and "no setup" local runs use PGlite (embedded Postgres) through the same code path | Real Postgres behaviour (constraints, triggers, row locks) with nothing to install; replaces mongodb-memory-server | A Docker Postgres for tests |
+| 60 | Ids are UUIDs; document lines (receipt, dispatch, restock, sale, label job) are JSON columns on their parent row | Lines are always read and written with their parent in one transaction, so separate tables would add joins without adding safety | A table per line type |
+| 61 | Never-negative stock and the append-only ledger are also enforced by the database (CHECK constraint, trigger) | A bug or a manual SQL session cannot break the two core stock rules | Enforcing only in application code |
+| 62 | Row-level security is enabled on every table with no policies | Supabase publishes the `public` schema through its REST API; this closes that door while the app (table owner) keeps working | Moving the tables to a private schema |
+| 63 | Document state changes lock the row first (`SELECT ... FOR UPDATE`) | Postgres does not abort the second writer the way MongoDB's write conflicts did; the lock makes "send twice" impossible | Optimistic version columns |
+| 64 | Expiring rows (login attempts, idempotency keys) are filtered by time on read and cleaned up now and then by the app | Postgres has no TTL indexes; avoids needing a scheduled job | pg_cron |
+| 65 | The migration started with an empty database and a fresh seed; MongoDB data was not copied | Only demo data existed | A one-off copy script |

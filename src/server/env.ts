@@ -7,8 +7,8 @@ function required(name: string): string {
 }
 
 export const env = {
-  get mongoUri() {
-    return required("MONGODB_URI");
+  get databaseUrl() {
+    return required("DATABASE_URL");
   },
   get sessionSecret() {
     const s = required("SESSION_SECRET");

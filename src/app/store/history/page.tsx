@@ -10,7 +10,7 @@ import { listMovements } from "@/server/stock/read";
 import { getProductsByIds } from "@/server/data/products";
 import { parseDayIST, endOfDayIST } from "@/lib/dates";
 import { dateTime, qtyFmt } from "@/lib/format";
-import type { MovementType } from "@/server/models/stock";
+import type { MovementType } from "@/server/db/types";
 
 export const metadata: Metadata = { title: "Stock History" };
 
