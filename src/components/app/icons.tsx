@@ -1,0 +1,37 @@
+import {
+  Home,
+  Package,
+  Truck,
+  Inbox,
+  ClipboardList,
+  Undo2,
+  Tag,
+  Receipt,
+  BarChart3,
+  Users,
+  Settings,
+  History,
+  Store,
+  PackagePlus,
+  Wallet,
+  type LucideIcon,
+} from "lucide-react";
+import type { IconKey } from "@/config/nav";
+
+export const ICONS: Record<IconKey, LucideIcon> = {
+  home: Home,
+  box: Package,
+  truck: Truck,
+  inbox: Inbox,
+  clipboard: ClipboardList,
+  undo: Undo2,
+  tag: Tag,
+  receipt: Receipt,
+  chart: BarChart3,
+  users: Users,
+  settings: Settings,
+  history: History,
+  store: Store,
+  download: PackagePlus,
+  wallet: Wallet,
+};
