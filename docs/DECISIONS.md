@@ -58,3 +58,5 @@ Each entry: decision, reason, alternative considered.
 | 52 | No service worker: manifest + icons make the app installable; offline only shows the "You are offline" banner | The brief does not require offline support; avoids stale-cache bugs with live stock numbers | Workbox offline caching |
 | 53 | PWA icons are generated from the text logo by `/icons/[name]` (next/og, static at build) | One brand source (`brand.ts`); swap for a real logo later | Hand-made PNG files |
 | 54 | Security headers: nosniff, SAMEORIGIN framing, strict referrer, HSTS, `Permissions-Policy: camera=(self)` | Best-practice score; the camera stays available for scanning | No headers |
+| 55 | Error logging: structured JSON lines via `onRequestError` (Vercel Logs) plus an optional webhook; no third-party SDK | Zero setup, no extra cost; easy to point at Slack/Discord/Logtail | Sentry SDK |
+| 56 | Friendly `error.tsx` (Try again + digest), `not-found.tsx`, and skeleton `loading.tsx` per portal | Graceful handling of slow or failed connections | Default Next.js pages |

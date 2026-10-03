@@ -205,3 +205,26 @@ Lighthouse (Chrome DevTools → Lighthouse → Mobile) on /login, /store, /store
 - [ ] iPhone Safari: Share → Add to Home Screen → open it → Scan asks for the camera and works; deny it and the typing box still works.
 - [ ] Switch the theme to dark: text stays readable and chips stay distinct.
 - [ ] Turn on airplane mode: the "You are offline" banner shows.
+
+---
+
+## Phase 11: Production readiness
+
+**Built**
+- `README.md`: local setup (Atlas or a local single-node replica set without Docker), commands, every environment variable, the Sales API, Vercel + Atlas deployment, backups (Atlas M10+ continuous backup or daily `mongodump`), error logging.
+- `src/instrumentation.ts`: JSON error logs plus optional `ERROR_WEBHOOK_URL`. `.env.example` updated.
+- `error.tsx` (friendly retry), `not-found.tsx`, skeleton `loading.tsx` for each portal.
+- `pnpm build` verified locally (all routes compile; icons prerendered).
+
+**Check by hand**
+- [ ] Vercel: set `MONGODB_URI`, `SESSION_SECRET` and `APP_URL`, then deploy; sign in with each demo login.
+- [ ] `pnpm create-platform-admin` against production works.
+- [ ] Trigger an error (e.g. open `/storeroom/products/not-an-id`): you get a friendly page and Vercel Logs shows nothing alarming (404). A real server error shows as a JSON log line.
+- [ ] Atlas: turn on backups (M10+) or schedule the `mongodump` command.
+
+## Definition of done: status
+- Lint and typecheck pass (Husky + CI). The unit and e2e suites are written; run `pnpm test` and `pnpm e2e` (CI runs both).
+- A fresh clone runs with `pnpm install`, `.env.local`, `pnpm seed` and `pnpm dev`.
+- Isolation tests cover tenant, store, cost price and bills access.
+- Device pass screenshots were checked at 360/768/1280; `tests/e2e/pages.spec.ts` covers every main screen at all six sizes.
+- No payment integration exists anywhere in the code.
