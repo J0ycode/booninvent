@@ -1,3 +1,4 @@
+import { ZodError } from "zod";
 import { count, type SQL } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import { getDb } from "@/server/db";
@@ -74,12 +75,16 @@ export async function rowCount(table: PgTable, where?: SQL): Promise<number> {
   return r.n;
 }
 
-/** Expect a promise to reject with an AppError code. */
+/**
+ * Expect a promise to reject with an AppError code.
+ * A Zod error counts as "VALIDATION": data functions throw it as-is and the action/route layer
+ * (errorResult / errorResponse in src/server/action.ts) reports it to users with that code.
+ */
 export async function expectCode(p: Promise<unknown>, code: string) {
   try {
     await p;
   } catch (e) {
-    const got = (e as { code?: string }).code;
+    const got = e instanceof ZodError ? "VALIDATION" : (e as { code?: string }).code;
     if (got !== code) throw new Error(`Expected error ${code} but got ${got ?? (e as Error).message}`);
     return;
   }
