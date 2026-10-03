@@ -20,3 +20,9 @@ Each entry: decision, reason, alternative considered.
 | 14 | Owner gets an "Approvals" page (and the dashboard links to it) | Owners may approve returns and write-offs; they need one place to do it | Approvals only inline on the dashboard |
 | 15 | Phone Scan button opens `<portal>/lookup` (scan, then product card with stock) | The bottom nav needs a Scan target that works on every portal | Opening the scanner without a destination |
 | 16 | Demo seed wipes and recreates two demo shops only (slugs `demo-baby-shop`, `other-baby-shop`) | Re-runnable without touching real shops | Wiping the whole database |
+| 17 | Auto barcodes are `BB` + an 8-digit per-tenant counter (Code 128); auto SKUs are `SKU-00001` | Short, scannable, unique per tenant; an existing barcode can be typed or scanned instead | EAN-13 with check digit (needs a GS1 prefix the shop does not own) |
+| 18 | Suppliers are managed at Products → Suppliers (Store Room) | Needed for receiving stock and bills, but not a top-level screen in the brief | A separate sidebar item |
+| 19 | CSV import is all-or-nothing: preview first, import only when every row is valid; bulk insert in one transaction | No half-imported catalogues; fast for 5,000 rows | Import valid rows and skip bad ones |
+| 20 | Product search: exact barcode, SKU prefix, or case-insensitive name contains, over an indexed lowercase name; 25 per page | Fast enough for 5,000 products per tenant without a search engine | Atlas Search |
+| 21 | Native checkbox and select controls in forms | Reliable FormData and the native phone pickers | Base UI checkbox/select |
+| 22 | Store staff see only active products and never see cost (the `costPrice` key is absent) | Cost-price rule; inactive products are hidden from stores | A null cost value |

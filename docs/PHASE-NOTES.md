@@ -29,3 +29,24 @@ pnpm e2e         # first time: pnpm exec playwright install chromium webkit
 - [ ] Forgot password: the console shows a link; resetting signs you in.
 - [ ] At 360px: bottom nav with a raised Scan button and More opening a sheet. At 768/1024: icon rail. At 1280+: full sidebar. No sideways scrolling.
 - [ ] The theme button cycles system, light, dark.
+
+---
+
+## Phase 2: Products, suppliers, barcodes, CSV import, scan/search
+
+**Built**
+- Data: `suppliers`, `products` (search, filters, server pagination), `productCosts` (separate collection, managers only), scan lookup by barcode/SKU, CSV import with validation preview (all-or-nothing, bulk insert).
+- Barcodes: auto Code 128 (`BB00000001`) or an entered/scanned code; unique per tenant; rendered as SVG with bwip-js.
+- Screens (Store Room): Products list (search, category/supplier/status filters, Store Room qty, low-stock highlight), Add/Edit product (with barcode and stock per location), Suppliers, Import CSV (template download, preview, import).
+- Shared: `ScanSearch` (debounced server search; USB scanner works by typing + Enter; camera button on touch devices), `ScannerSheet` (full-screen camera via ZXing, item card + quantity stepper, typing fallback when permission is denied), `<portal>/lookup` behind the phone Scan button.
+- Seed: 2 suppliers + 63 products.
+
+**Run**: `pnpm test` (adds `tests/unit/products.test.ts`)
+
+**Check by hand** (storeroom@demo.test)
+- [ ] Products: type "romp" and the list filters; paging works; filters combine.
+- [ ] Add a product with the barcode empty and get `BB…`; the edit page shows the barcode image.
+- [ ] Add a product with an existing barcode: "Another product already uses this barcode".
+- [ ] Import: download the template, import it, see the preview, then import. Break a row (e.g. category "Shoes") and import is blocked with row errors.
+- [ ] Phone: tap Scan in the bottom bar and allow the camera; scanning a printed barcode shows the item card with stock. Deny the camera and you can type the code.
+- [ ] storea@demo.test: Scan shows only Store A stock and no cost anywhere.

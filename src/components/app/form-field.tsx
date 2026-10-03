@@ -1,3 +1,4 @@
+import type React from "react";
 import type { ReactNode, SelectHTMLAttributes } from "react";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
@@ -60,4 +61,9 @@ export function ActionBar({ children }: { children: ReactNode }) {
       {children}
     </div>
   );
+}
+
+/** Native checkbox: submits "on" in FormData; 20px box inside a 44px label row. */
+export function CheckboxInput(props: Omit<React.InputHTMLAttributes<HTMLInputElement>, "type">) {
+  return <input type="checkbox" {...props} className={cn("size-5 shrink-0 rounded accent-[var(--primary)]", props.className)} />;
 }

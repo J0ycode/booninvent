@@ -5,9 +5,8 @@ import { useRouter } from "next/navigation";
 import { Plus, Pencil, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Field, NativeSelect } from "@/components/app/form-field";
+import { Field, NativeSelect, CheckboxInput } from "@/components/app/form-field";
 import { DataTable } from "@/components/app/data-table";
 import { Section } from "@/components/app/section";
 import { Status } from "@/components/app/status-chip";
@@ -92,7 +91,7 @@ function UserDialog({ editing, stores, onClose, meId }: { editing: Editing; stor
           )}
           {user && user.id !== meId && (
             <label className="flex min-h-11 items-center gap-3 text-sm">
-              <Checkbox name="active" defaultChecked={user.active} />
+              <CheckboxInput name="active" defaultChecked={user.active} />
               Account active (can sign in)
             </label>
           )}
