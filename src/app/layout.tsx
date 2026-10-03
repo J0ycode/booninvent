@@ -29,7 +29,8 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en-IN" className={`${nunito.variable} h-full antialiased`} suppressHydrationWarning>
-      <body className="min-h-full">
+      {/* Browser extensions add their own attributes to <body> before React loads; ignore those. */}
+      <body className="min-h-full" suppressHydrationWarning>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           {children}
           <Toaster position="top-center" richColors closeButton />
