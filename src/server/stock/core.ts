@@ -77,7 +77,7 @@ export async function applyMoves(ctx: TenantCtx, session: ClientSession, moves: 
           balanceAfter,
           refType: ref.refType,
           refId: ref.refId,
-          userId: ctx.userId,
+          userId: ctx.userId || null, // empty for API-key (machine) calls
           note: m.note,
         },
       ],

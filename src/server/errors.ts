@@ -7,7 +7,9 @@ export type ErrorCode =
   | "INSUFFICIENT_STOCK"
   | "TENANT_SUSPENDED"
   | "RATE_LIMITED"
-  | "INVALID_STATE";
+  | "INVALID_STATE"
+  | "UNKNOWN_BARCODE"
+  | "INVALID_LOCATION";
 
 const STATUS: Record<ErrorCode, number> = {
   UNAUTHENTICATED: 401,
@@ -19,6 +21,8 @@ const STATUS: Record<ErrorCode, number> = {
   TENANT_SUSPENDED: 423,
   RATE_LIMITED: 429,
   INVALID_STATE: 409,
+  UNKNOWN_BARCODE: 422,
+  INVALID_LOCATION: 422,
 };
 
 /** An error whose message is safe and friendly enough to show to the user. */

@@ -107,3 +107,23 @@ pnpm e2e         # first time: pnpm exec playwright install chromium webkit
 - [ ] storeroom@demo.test → Restock Requests → open it → "Approve and create dispatch" lands on the draft dispatch → Send. The store sees the request as Dispatched.
 - [ ] Suggest restock (store staff): with nothing low you see "Nothing is at or below its reorder level". After Phase 6 sales, Store A has low items; review them with Approve/Edit/Skip, then Forward.
 - [ ] Storeroom never sees a suggestion before it is forwarded.
+
+---
+
+## Phase 6: Returns and damaged, sales API
+
+**Built**
+- `src/server/stock/returns.ts`: store entries (Return to Store Room / Damaged) wait for approval (RETURN_OUT+RETURN_IN or DAMAGE on approval, reject with reason). Store Room entries (Damaged / Return to supplier) apply immediately (DAMAGE / SUPPLIER_RETURN).
+- `src/server/stock/sales.ts`: `applySale()` (idempotent on externalRef, race-safe, all-or-nothing, clear error codes) used by `POST /api/v1/sales` (API key) and `recordSale()` (in-system).
+- API keys: create / rotate / revoke in Owner → Settings (shown once, stored hashed), with the store ids listed for the integration.
+- Screens: Store → Return or Report Damaged; Store Room → Returns and Damaged (approvals, delivery discrepancies list, record Store Room damage/supplier return, history); Owner → Approvals.
+- Docs: `docs/SALES_API.md` (merged into the README in Phase 11).
+- Seed: 6 demo sales at Store A (some items now low, so Suggest restock works) and 2 pending entries.
+
+**Run**: `pnpm test` (adds `tests/unit/returns-sales.test.ts` and `tests/unit/routes.test.ts`: every API route rejects unauthenticated calls)
+
+**Check by hand**
+- [ ] owner@demo.test → Settings → Create API key → copy → run the curl from `docs/SALES_API.md` twice: 201 then 200 duplicate. Rotate, and the old key gets 401.
+- [ ] storea@demo.test → Request Restock → Suggest restock now lists low items (Store A sold some).
+- [ ] storea → Return or Report Damaged → Damaged 1 piece → Pending. storeroom (or owner → Approvals) approves → Store A qty drops by 1.
+- [ ] storeroom → Returns and Damaged → record "Return to supplier" → Store Room qty drops at once.

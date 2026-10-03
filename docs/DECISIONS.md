@@ -37,3 +37,8 @@ Each entry: decision, reason, alternative considered.
 | 31 | A manual restock request is sent to the Store Room on submit (no saved draft step) | The brief says "enter quantities, submit"; fewer steps for staff | A savable draft |
 | 32 | "Suggest restock" covers products the store has carried (a stock row exists), active, with reorderLevel > 0; a new suggestion replaces an unforwarded one | Otherwise every catalogue item would be suggested to every store | Suggesting the whole catalogue |
 | 33 | "Edit" on a suggested line = approve with a new quantity | Matches Approve / Edit / Skip with no extra state | A separate EDITED state |
+| 34 | Store Room manager/owner entries (damaged, return to supplier) apply immediately; store entries wait for approval | Managers are the approvers; the brief requires approval only for store returns and write-offs | Self-approval step |
+| 35 | Stores can request several products in one return/damage submission (one entry per product) | Faster for staff; still per-product approval | One product per form |
+| 36 | API key format `bbk_` + 40 random chars, SHA-256 hashed, one active key per shop, rotate = revoke old | Simple to use; secure at rest | Multiple named keys |
+| 37 | Sales API: duplicate `externalRef` → 200 with `duplicate: true`; a failed sale does not reserve the `externalRef` | Safe retries; a corrected retry can still go through | 409 on duplicates |
+| 38 | API-key calls run with an empty userId (movements and audit show userId null, audit action `sale.api`) | No fake user; audit still shows the source | A system user record |

@@ -5,6 +5,8 @@ import { importProducts, listProducts } from "@/server/data/products";
 import { receiveStock } from "@/server/stock/receipts";
 import { saveDraft, sendDispatch, receiveDispatch } from "@/server/stock/dispatches";
 import { createManualRequest } from "@/server/data/restock";
+import { applySale } from "@/server/stock/sales";
+import { createEntries } from "@/server/stock/returns";
 import { User } from "@/server/models/core";
 
 export interface SeedTenant {
@@ -120,4 +122,13 @@ export async function seedCatalogAndStock(_t: SeedTenant) {
   // Phase 5: a manual restock request waiting for the Store Room.
   await createManualRequest(staffB, { note: "Weekend rush", lines: clothing.slice(12, 16).map((p) => ({ productId: p.id, quantity: 6 })) });
   console.log("Seeded 1 restock request.");
+
+  // Phase 6: a few sales at Store A (leaves some items low) and pending return/damage reports.
+  const owner = await ctxFor("owner@demo.test");
+  for (let i = 0; i < 6; i++) {
+    await applySale(owner, { locationId: storeA, externalRef: `DEMO-BILL-${i + 1}`, items: [{ barcode: clothing[i].barcode, quantity: 3 }, { barcode: clothing[i + 6].barcode, quantity: 1 }] }, "INTERNAL");
+  }
+  await createEntries(staffA, { type: "DAMAGED", reason: "Stain that will not wash out", lines: [{ productId: clothing[8].id, quantity: 1 }] });
+  await createEntries(staffB, { type: "RETURN_TO_STOREROOM", reason: "Slow seller", lines: [{ productId: clothing[14].id, quantity: 2 }] });
+  console.log("Seeded 6 sales and 2 return/damage entries.");
 }

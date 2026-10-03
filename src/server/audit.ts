@@ -12,7 +12,7 @@ export async function writeAudit(
   session?: ClientSession,
 ) {
   await AuditLog.create(
-    [{ tenantId: ctx.tenantId, userId: ctx.userId, action, entity, entityId, data }],
+    [{ tenantId: ctx.tenantId, userId: ctx.userId || null, action, entity, entityId, data }],
     { session },
   );
 }
