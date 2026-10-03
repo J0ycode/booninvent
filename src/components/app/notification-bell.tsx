@@ -1,6 +1,9 @@
+import { notifications } from "@/server/data/dashboard";
 import type { Ctx } from "@/server/context";
+import { BellMenu } from "./bell-menu";
 
-/** Placeholder; filled in Phase 9 (computed on load, no realtime). */
-export async function NotificationBell({ ctx: _ctx }: { ctx: Ctx }) {
-  return null;
+/** Server part: notices are computed on page load (no realtime). */
+export async function NotificationBell({ ctx }: { ctx: Ctx }) {
+  const items = await notifications(ctx).catch(() => []);
+  return <BellMenu items={items} />;
 }

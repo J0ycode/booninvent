@@ -51,3 +51,7 @@ Each entry: decision, reason, alternative considered.
 | 45 | One CSV export route `/api/bills/export` serves supplier bills (managers), the owner's platform bills, and all platform bills (admin), by role | One place to secure | Separate routes |
 | 46 | CSV cells starting with = + - @ get a leading ' | Prevents spreadsheet formula injection | Raw values |
 | 47 | The STOREROOM_MANAGER sees supplier bills but not platform bills | The brief gives the platform Billing page to the OWNER only | Showing both |
+| 48 | Low stock = quantity ≤ reorderLevel (reorderLevel > 0). The Store Room counts never-received products as 0; stores only count products they carry | The Store Room must see gaps in the catalogue; stores should not see the whole catalogue as low | The same rule everywhere |
+| 49 | Reports show a 50-row on-screen preview and export the full CSV (up to 5,000 rows) from `/api/reports/:type` | "CSV export only" with a quick check before downloading | CSV without preview |
+| 50 | Dashboard chart: one single-series horizontal bar chart (pieces by location) in CSS, direct-labelled, with a screen-reader table | One chart, as the brief asks; no chart library needed | A charting library |
+| 51 | The bell's notices are computed in the portal layout and refresh on navigation after any change (revalidatePath) | Computed on load, no realtime, as the brief asks | Polling |

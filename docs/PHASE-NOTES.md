@@ -162,3 +162,21 @@ pnpm e2e         # first time: pnpm exec playwright install chromium webkit
 - [ ] owner@demo.test → Billing: BB-2026-10 is overdue with no buttons (read-only).
 - [ ] admin@demo.test → Shops → Demo Baby Shop → Mark paid BB-2026-10. Then Suspend the shop. owner@demo.test sees the red suspended banner, can browse, and any save fails with "This shop is suspended". Activate it again.
 - [ ] storea@demo.test has no Bills menu; `/api/bills/export?kind=supplier` returns 403.
+
+---
+
+## Phase 9: Dashboards, reports, notifications
+
+**Built**
+- `src/server/data/dashboard.ts`: Store Room dashboard (products, pieces, low stock, pending requests/returns/discrepancies, unpaid/overdue bills, recent activity), Store dashboard, Owner dashboard (every location's pieces + low-stock, one bar chart, pending approvals, unpaid supplier and BoonBaby bills, activity), first-run checklist, notification bell (low stock, approvals, dispatches to confirm, overdue bills; per role).
+- `stockAtLocation()` (search, low filter, pagination) behind Store → My Stock; Store → Stock History (ledger with type and date filters).
+- `src/server/data/reports.ts` + `/api/reports/:type`: stock list (with cost for managers), low stock, dispatch history by store, damaged and returns, stock movements, bills summary; location and date filters; preview + CSV. Same page for Owner and Store Room.
+
+**Run**: `pnpm test` (adds `tests/unit/dashboard-reports.test.ts`)
+
+**Check by hand**
+- [ ] owner@demo.test: the dashboard shows the bar chart for Store Room / Store A / Store B and the bell with a count; tap the bell and follow a notice.
+- [ ] A new signup shows the "Getting started" checklist, which ticks off as you go.
+- [ ] storea@demo.test → My Stock: search "romper"; "Low stock only"; Stock History shows sales as −.
+- [ ] Reports: switch through all six; the date filters change the dispatch/returns/movements/bills rows; Download CSV opens in Excel.
+- [ ] At 360px, dashboards are 2 cards per row and nothing scrolls sideways.

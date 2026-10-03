@@ -1,6 +1,7 @@
 import "server-only";
 import { Types } from "mongoose";
 import { StockLevel, StockMovement, type MovementType } from "../models/stock";
+import { Product } from "../models/business";
 import { guard, tf, assertLocationAccess } from "../data/guard";
 import type { Ctx, TenantCtx } from "../context";
 
@@ -136,4 +137,80 @@ export async function lowStockAt(ctx: Ctx | null, locationId: string): Promise<{
 /** Count of low-stock products per location, for dashboards. */
 export async function lowStockCount(ctx: Ctx | null, locationId: string) {
   return (await lowStockAt(ctx, locationId)).length;
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+export interface StockRow {
+  productId: string;
+  name: string;
+  sku: string;
+  barcode: string;
+  category: "CLOTHING" | "ACCESSORY";
+  sellingPrice: number;
+  reorderLevel: number;
+  quantity: number;
+}
+
+/**
+ * Stock at one location, searchable and paginated, starting from products.
+ * includeUnstocked: also list active products with no stock row (quantity 0), used for the Store Room.
+ * low: only quantity <= reorderLevel (and reorderLevel > 0).
+ */
+export async function stockAtLocation(
+  ctx: Ctx | null,
+  locationId: string,
+  opts: { q?: string; low?: boolean; includeUnstocked?: boolean; page?: number; pageSize?: number } = {},
+) {
+  const c = await guard(ctx, ALL_ROLES);
+  assertLocationAccess(c, locationId);
+  const tenantId = new Types.ObjectId(c.tenantId);
+  const loc = new Types.ObjectId(locationId);
+  const pageSize = Math.min(opts.pageSize ?? 25, 10000);
+  const page = Math.max(opts.page ?? 1, 1);
+  const match: Record<string, unknown> = { tenantId, active: true };
+  const q = opts.q?.trim();
+  if (q) match.$or = [{ barcode: q }, { sku: { $regex: `^${escapeRe(q)}`, $options: "i" } }, { nameLower: { $regex: escapeRe(q.toLowerCase()) } }];
+  const pipeline: Record<string, unknown>[] = [
+    { $match: match },
+    { $lookup: { from: "stocklevels", let: { pid: "$_id" }, pipeline: [{ $match: { $expr: { $and: [{ $eq: ["$productId", "$$pid"] }, { $eq: ["$locationId", loc] }, { $eq: ["$tenantId", tenantId] }] } } }, { $project: { quantity: 1 } }], as: "lvl" } },
+    { $addFields: { carried: { $gt: [{ $size: "$lvl" }, 0] }, quantity: { $ifNull: [{ $first: "$lvl.quantity" }, 0] } } },
+  ];
+  if (!opts.includeUnstocked) pipeline.push({ $match: { carried: true } });
+  if (opts.low) pipeline.push({ $match: { reorderLevel: { $gt: 0 }, $expr: { $lte: ["$quantity", "$reorderLevel"] } } });
+  pipeline.push({
+    $facet: {
+      rows: [{ $sort: { nameLower: 1, _id: 1 } }, { $skip: (page - 1) * pageSize }, { $limit: pageSize }],
+      total: [{ $count: "n" }],
+      sum: [{ $group: { _id: null, pieces: { $sum: "$quantity" } } }],
+    },
+  });
+  const [res] = await Product.aggregate<{
+    rows: (StockRow & { _id: Types.ObjectId })[];
+    total: { n: number }[];
+    sum: { pieces: number }[];
+  }>(pipeline as never);
+  return {
+    rows: res.rows.map(
+      (r): StockRow => ({
+        productId: String(r._id),
+        name: r.name,
+        sku: r.sku,
+        barcode: r.barcode,
+        category: r.category,
+        sellingPrice: r.sellingPrice,
+        reorderLevel: r.reorderLevel,
+        quantity: r.quantity,
+      }),
+    ),
+    total: res.total[0]?.n ?? 0,
+    pieces: res.sum[0]?.pieces ?? 0,
+    page,
+    pageSize,
+  };
+}
+
+/** Low-stock count at a location (Store Room counts never-received products as 0). */
+export async function lowStockCountAt(ctx: Ctx | null, locationId: string, includeUnstocked: boolean) {
+  return (await stockAtLocation(ctx, locationId, { low: true, includeUnstocked, pageSize: 1 })).total;
 }
