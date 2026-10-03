@@ -180,3 +180,28 @@ pnpm e2e         # first time: pnpm exec playwright install chromium webkit
 - [ ] storea@demo.test → My Stock: search "romper"; "Low stock only"; Stock History shows sales as −.
 - [ ] Reports: switch through all six; the date filters change the dispatch/returns/movements/bills rows; Download CSV opens in Excel.
 - [ ] At 360px, dashboards are 2 cards per row and nothing scrolls sideways.
+
+---
+
+## Phase 10: PWA, device, accessibility and performance pass
+
+**Built / checked**
+- Installable PWA: `src/app/manifest.ts` (name "BoonBaby Store Manager", short_name "BoonBaby", standalone, theme colour), generated icons (192, 512, maskable 512, apple-touch 180), iOS meta (`appleWebApp`), `viewport-fit=cover` + safe-area insets.
+- Camera: `Permissions-Policy: camera=(self)`; the scanner needs HTTPS (Vercel provides it) and falls back to typing when permission is denied or there is no camera.
+- Device pass (screenshots at 360×800, 768×1024, 1280×800): no sideways scrolling; the sticky action bar now clears the raised Scan button; the sidebar title wraps instead of truncating.
+- Accessibility: skip link, visible focus ring, labels on every input, aria-labels on icon buttons, screen-reader table for the chart, reduced motion respected, AA-contrast tokens in light and dark.
+- Performance: server-side pagination/search everywhere, debounced search, the scanner library is loaded only when the scanner opens, no chart library, security headers.
+- New e2e spec `tests/e2e/pages.spec.ts`: every main screen per role at every size (no overflow, no client errors), 44px bottom-bar targets, scanner typing fallback, skip link, manifest and icons.
+
+**Run**
+```
+pnpm exec playwright install chromium webkit   # once
+pnpm e2e
+```
+Lighthouse (Chrome DevTools → Lighthouse → Mobile) on /login, /store, /storeroom/products after `pnpm build && pnpm start`: target 90+ for performance, accessibility and best practices.
+
+**Check by hand**
+- [ ] Android Chrome: open the live HTTPS site → "Install app" → it opens standalone; Scan opens the rear camera.
+- [ ] iPhone Safari: Share → Add to Home Screen → open it → Scan asks for the camera and works; deny it and the typing box still works.
+- [ ] Switch the theme to dark: text stays readable and chips stay distinct.
+- [ ] Turn on airplane mode: the "You are offline" banner shows.

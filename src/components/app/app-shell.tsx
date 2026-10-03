@@ -23,7 +23,7 @@ function Logo({ compact }: { compact?: boolean }) {
       <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-sm text-primary-foreground" aria-hidden>
         {brand.logoText}
       </span>
-      {!compact && <span className="truncate">{brand.name}</span>}
+      {!compact && <span className="text-sm leading-tight">{brand.name}</span>}
     </span>
   );
 }

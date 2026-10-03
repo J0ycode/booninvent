@@ -55,3 +55,6 @@ Each entry: decision, reason, alternative considered.
 | 49 | Reports show a 50-row on-screen preview and export the full CSV (up to 5,000 rows) from `/api/reports/:type` | "CSV export only" with a quick check before downloading | CSV without preview |
 | 50 | Dashboard chart: one single-series horizontal bar chart (pieces by location) in CSS, direct-labelled, with a screen-reader table | One chart, as the brief asks; no chart library needed | A charting library |
 | 51 | The bell's notices are computed in the portal layout and refresh on navigation after any change (revalidatePath) | Computed on load, no realtime, as the brief asks | Polling |
+| 52 | No service worker: manifest + icons make the app installable; offline only shows the "You are offline" banner | The brief does not require offline support; avoids stale-cache bugs with live stock numbers | Workbox offline caching |
+| 53 | PWA icons are generated from the text logo by `/icons/[name]` (next/og, static at build) | One brand source (`brand.ts`); swap for a real logo later | Hand-made PNG files |
+| 54 | Security headers: nosniff, SAMEORIGIN framing, strict referrer, HSTS, `Permissions-Policy: camera=(self)` | Best-practice score; the camera stays available for scanning | No headers |

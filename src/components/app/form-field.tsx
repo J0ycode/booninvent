@@ -57,7 +57,7 @@ export function FormGrid({ children }: { children: ReactNode }) {
 /** Primary actions; sticky at the bottom on phones (above the bottom nav). */
 export function ActionBar({ children }: { children: ReactNode }) {
   return (
-    <div className="sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-20 -mx-4 mt-6 flex gap-2 border-t bg-background/95 px-4 py-3 backdrop-blur md:static md:mx-0 md:justify-end md:border-0 md:bg-transparent md:p-0 [&>*]:flex-1 md:[&>*]:flex-none">
+    <div className="sticky bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-20 -mx-4 mt-6 flex gap-2 border-t bg-background/95 px-4 py-3 backdrop-blur md:static md:mx-0 md:justify-end md:border-0 md:bg-transparent md:p-0 [&>*]:flex-1 md:[&>*]:flex-none">
       {children}
     </div>
   );

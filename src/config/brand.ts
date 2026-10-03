@@ -4,5 +4,5 @@ export const brand = {
   shortName: "BoonBaby",
   logoText: "BB",
   description: "Stock management for baby shops",
-  themeColor: "#2a9d8f",
+  themeColor: "#1f7a72",
 } as const;
